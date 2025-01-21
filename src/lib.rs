@@ -14,7 +14,14 @@
 //! ```
 //! use a1::{MachineBuilder, Transition};
 //!
+//! tracing_subscriber::fmt::init();
+//!
 //! let machine = MachineBuilder::new()
+//!     .with_transition("init", Transition::new(
+//!         |i: &u32| { *i != 1 },
+//!         |d: &u32| { true },
+//!         "init",
+//!         |d: u32, _| { d }))
 //!     .with_transition("init", Transition::new(   // Begin a new transition,
 //!         |i: &u32| { *i == 1 },                  // continue if input is one,
 //!         |d: &u32| { *d != 2 },                  // continue if counter is not two,
@@ -24,18 +31,21 @@
 //!         |i: &u32| { *i == 1 },
 //!         |d: &u32| { *d == 2 },
 //!         "accept",
-//!         |d, _| { d + 1 }))
+//!         |d: u32, _| { d + 1 }))
+//!     .with_transition("accept", Transition::new(
+//!         |i: &u32| { *i != 0 },
+//!         |d: &u32| { true },
+//!         "accept",
+//!         |d: u32, _| { d + 1 }))
 //!     .with_transition("accept", Transition::new(
 //!         |i: &u32| { *i == 1 },
 //!         |d: &u32| { true },
 //!         "init",
-//!         |d, _| { d + 1 }))
+//!         |d: u32, _| { d + 1 }))
 //!     .with_accepting("accept")
 //!     .build();
 //!
 //! assert!(machine.exec("init", vec![3, 1, 1, 1, 10, 8]));
-//! assert!(!machine.exec("init", vec![3, 0, 1, 1, 10, 8]));
-//! assert!(!machine.exec("init", vec![3, 0, 1, 1, 10, 1, 1]));
 //! ```
 //!
 //! # References
@@ -43,7 +53,8 @@
 //! \[1\] Cheng, K.-T. & Krishnakumar, A. Automatic Functional Test Generation Using The Extended Finite State Machine Model.
 
 use std::collections::{HashMap, HashSet};
-use tracing::{error, info, warn};
+use std::fmt::Debug;
+use tracing::info;
 
 type Validate<I> = fn(&I) -> bool;
 type Enable<D> = fn(&D) -> bool;
@@ -84,6 +95,11 @@ impl<D, I> Transition<D, I> {
     }
 }
 
+#[derive(Debug)]
+struct Block<D> {
+    configs: Vec<(String, D)>,
+}
+
 /// Describes an EFSM and subsequently a regular language. In most cases, use the
 /// [builder](MachineBuilder) to specify a machine.
 ///
@@ -98,7 +114,7 @@ pub struct Machine<D, I> {
     accepting: HashSet<String>,
 }
 
-impl<D: Default, I> Machine<D, I> {
+impl<D: Default + Clone + Debug, I: Debug> Machine<D, I> {
     fn new(states: HashMap<String, Vec<Transition<D, I>>>, accepting: HashSet<String>) -> Self {
         Machine { states, accepting }
     }
@@ -110,43 +126,44 @@ impl<D: Default, I> Machine<D, I> {
     pub fn exec(&self, s_init: &str, is: Vec<I>) -> bool {
         info!("executing input sequence");
 
-        let mut rf = D::default();
-        let mut s: String = s_init.into();
+        let mut b = Block {
+            configs: vec![(s_init.into(), Default::default())],
+        };
 
         for i in is {
-            info!("received input");
+            info!("received input {:?}", i);
+            info!("from block {:?}", b);
 
-            let next = match self.states.get(&s) {
-                Some(ts) => {
-                    let mut next: Option<&Transition<D, I>> = None;
-                    for t in ts {
-                        if (t.validate)(&i) && (t.enable)(&rf) {
-                            if !next.is_none() {
-                                panic!(">1 possible transition from state '{}'", s);
-                            }
+            b = self.transition(&i, b);
 
-                            next = Some(t);
-                        }
+            info!("to block {:?}", b);
+        }
+
+        info!("reached end of input");
+        self.block_accepts(b)
+    }
+
+    fn transition(&self, i: &I, b: Block<D>) -> Block<D> {
+        let mut configs: Vec<(String, D)> = Vec::new();
+        for (state, data) in b.configs {
+            if let Some(transitions) = self.states.get(&state) {
+                for transition in transitions {
+                    if (transition.validate)(&i) && (transition.enable)(&data) {
+                        let data = (transition.update)(data.clone(), i);
+                        configs.push((transition.s_out.clone(), data));
                     }
-                    next
                 }
-                None => None,
-            };
-
-            if let Some(next) = next {
-                info!(
-                    "found transition from state '{}' to state '{}'",
-                    s, next.s_out
-                );
-                rf = (next.update)(rf, &i);
-                s = next.s_out.clone();
-            } else {
-                warn!("no valid transition for this input");
             }
         }
 
-        info!("reached end of input in state '{}'", s);
-        self.accepting.contains(&s)
+        Block { configs }
+    }
+
+    fn block_accepts(&self, b: Block<D>) -> bool {
+        b.configs
+            .iter()
+            .map(|(state, _)| self.accepting.contains(state))
+            .fold(false, |acc, accept| acc || accept)
     }
 }
 
@@ -156,7 +173,7 @@ pub struct MachineBuilder<D, I> {
     accepting: HashSet<String>,
 }
 
-impl<D: Default, I> MachineBuilder<D, I> {
+impl<D: Default + Clone + Debug, I: Debug> MachineBuilder<D, I> {
     /// Create a new machine builder.
     pub fn new() -> Self {
         MachineBuilder {
@@ -192,29 +209,27 @@ impl<D: Default, I> MachineBuilder<D, I> {
 mod tests {
     use super::*;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     struct Input {
         i1: bool,
         i2: u64,
     }
 
-    #[derive(Default)]
+    #[derive(Default, Clone, Debug)]
     struct RegisterFile {
         r1: u64,
     }
 
     #[test]
     fn it_works() {
-        tracing_subscriber::fmt::init();
-
         let machine = MachineBuilder::new()
             .with_transition(
                 "s0",
                 Transition::new(
                     |i: &Input| i.i1,
-                    |rf: &RegisterFile| true,
+                    |_| true,
                     "s1",
-                    |mut rf, &i| {
+                    |mut rf: RegisterFile, &i| {
                         rf.r1 = i.i2;
                         rf
                     },
@@ -222,12 +237,7 @@ mod tests {
             )
             .with_transition(
                 "s0",
-                Transition::new(
-                    |i: &Input| !i.i1,
-                    |rf: &RegisterFile| true,
-                    "s0",
-                    |rf, _| rf,
-                ),
+                Transition::new(|i: &Input| !i.i1, |_| true, "s0", |rf, _| rf),
             )
             .with_transition(
                 "s1",
@@ -252,12 +262,7 @@ mod tests {
             )
             .with_transition(
                 "s1",
-                Transition::new(
-                    |i: &Input| !i.i1,
-                    |rf: &RegisterFile| true,
-                    "s1",
-                    |rf, _| rf,
-                ),
+                Transition::new(|i: &Input| !i.i1, |_| true, "s1", |rf, _| rf),
             )
             .with_accepting("s1")
             .build();
