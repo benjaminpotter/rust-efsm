@@ -1,7 +1,7 @@
 
 
 ### Installing
-This project is written in Rust. Rust uses a tool called `cargo` for most things e.g., testing, running, documenting, etc. Please install Rust before continuing.
+This project is written in Rust. Rust uses a tool called `cargo` for most things e.g., testing, running, documenting, etc. Please install Rust before continuing. You can find those instructions on the rust-lang [website](https://www.rust-lang.org/tools/install).
 
 ```
 git clone https://github.com/benjaminpotter/rust-efsm.git
