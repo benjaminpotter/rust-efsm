@@ -12,7 +12,7 @@
 //! `1, 10, 34, 1, 1` and `1, 1, 1`, but not `13, 2, 1, 1` and `42, 0, 9, 1, 1, 1, 1`.
 //!
 //! ```
-//! use a1::{MachineBuilder, Transition};
+//! use rust_efsm::{MachineBuilder, Transition};
 //!
 //! tracing_subscriber::fmt::init();
 //!
