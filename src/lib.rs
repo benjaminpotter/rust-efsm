@@ -1,6 +1,6 @@
 //! # Extended Finite State Machine (EFSM)
 //!
-//! `a1` provides a Rust implementation of the EFSM mostly defined in \[1\]. In this crate, an EFSM
+//! `rust-efsm` provides a Rust implementation of the EFSM mostly defined in \[1\]. In this crate, an EFSM
 //! is simply referred to as a [machine](Machine). A machine defines a language by __accepting__
 //! and __rejecting__ different input sequences called words. Machines should be specified using the
 //! [builder](MachineBuilder).
