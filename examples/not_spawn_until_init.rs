@@ -4,25 +4,50 @@
 //!
 //! Essentially we consider the LTL: not spawn until init.
 
-use rust_efsm::{MachineBuilder, Transition};
+use rust_efsm::{MachineBuilder, Transition, Update};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Ap {
     Init,
     Spawn,
     Other,
 }
 
+enum UpdateType {
+    True,
+    Identity,
+}
+
+struct MachineUpdate(UpdateType);
+
+impl Update for MachineUpdate {
+    type D = bool;
+    type I = Ap;
+
+    fn update(&self, data: Self::D, input: &Self::I) -> Self::D {
+        match self.0 {
+            UpdateType::Identity => data,
+            UpdateType::True => true,
+        }
+    }
+}
+
+impl Default for MachineUpdate {
+    fn default() -> Self {
+        MachineUpdate(UpdateType::True)
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
 
-    let machine = MachineBuilder::<bool, Ap>::new()
+    let machine = MachineBuilder::<bool, Ap, MachineUpdate>::new()
         .with_transition(
             "Accept",
             Transition {
                 s_out: "Accept".into(),
-                validate: |i| *i == Ap::Other,
-                update: |is_init, _| is_init,
+                enable: |_, i| *i == Ap::Other,
+                update: MachineUpdate(UpdateType::Identity),
                 ..Default::default()
             },
         )
@@ -30,7 +55,7 @@ fn main() {
             "Accept",
             Transition {
                 s_out: "Accept".into(),
-                validate: |i| *i == Ap::Init,
+                enable: |_, i| *i == Ap::Init,
                 ..Default::default()
             },
         )
@@ -38,8 +63,7 @@ fn main() {
             "Accept",
             Transition {
                 s_out: "Accept".into(),
-                validate: |i| *i == Ap::Spawn,
-                enable: |is_init| *is_init,
+                enable: |&is_init, &i| i == Ap::Spawn && is_init,
                 ..Default::default()
             },
         )

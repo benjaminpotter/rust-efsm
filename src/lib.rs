@@ -5,55 +5,6 @@
 //! and __rejecting__ different input sequences called words. Machines should be specified using the
 //! [builder](MachineBuilder).
 //!
-//! # Example
-//!
-//! In the following example, we consider a machine that defines the
-//! language `{ a | a contains exactly 3 ones }`. So, this language contains words like
-//! `1, 10, 34, 1, 1` and `1, 1, 1`, but not `13, 2, 1, 1` and `42, 0, 9, 1, 1, 1, 1`.
-//!
-//! ```
-//! use rust_efsm::{MachineBuilder, Transition};
-//!
-//! tracing_subscriber::fmt::init();
-//!
-//! let machine = MachineBuilder::<u32, u32>::new()
-//!     .with_transition("init", Transition {
-//!         s_out: "init".into(),
-//!         validate: |i| *i != 1,
-//!         ..Default::default()
-//!     })
-//!     .with_transition("init", Transition {   // Begin a new transition,
-//!         s_out: "init".into(),               // transition to init,
-//!         validate: |i| *i == 1,              // continue if input is one,
-//!         enable: |d| *d != 2,                // continue if counter is not two,
-//!         update: |d, _|  d + 1,              // increment counter.
-//!         ..Default::default()
-//!     })
-//!     .with_transition("init", Transition {
-//!         s_out: "accept".into(),
-//!         validate: |i| *i == 1,
-//!         enable: |d| *d == 2,
-//!         update: |d, _| d + 1,
-//!         ..Default::default()
-//!     })
-//!     .with_transition("accept", Transition {
-//!         s_out: "accept".into(),
-//!         validate: |i|  *i != 0,
-//!         update: |d, _| d + 1,
-//!         ..Default::default()
-//!     })
-//!     .with_transition("accept", Transition {
-//!         s_out: "init".into(),
-//!         validate: |i| *i == 1,
-//!         update: |d, _| d + 1,
-//!         ..Default::default()
-//!     })
-//!     .with_accepting("accept")
-//!     .build();
-//!
-//! assert!(machine.exec("init", 0, vec![3, 1, 1, 1, 10, 8]));
-//! ```
-//!
 //! # References
 //!
 //! \[1\] Cheng, K.-T. & Krishnakumar, A. Automatic Functional Test Generation Using The Extended Finite State Machine Model.
@@ -77,6 +28,8 @@ pub trait Update {
     // NOTE: ATM, there is only one implementation of update function used for every transition.
     // NOTE: The user can store data in the update state, so they can just switch on some enum.
     // NOTE: I don't know if this is really desirable yet?
+    // NOTE: I think the trade off is between suffering dynamic disbatch to enable different
+    // updates or using generics but only get one update struct.
     fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
 }
 
