@@ -74,6 +74,9 @@ pub trait Update {
     type D;
     type I;
 
+    // NOTE: ATM, there is only one implementation of update function used for every transition.
+    // NOTE: The user can store data in the update state, so they can just switch on some enum.
+    // NOTE: I don't know if this is really desirable yet?
     fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
 }
 

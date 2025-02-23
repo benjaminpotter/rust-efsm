@@ -1,26 +1,33 @@
-use rust_efsm::{MachineBuilder, Transition};
+use rust_efsm::{MachineBuilder, Transition, Update};
+
+// Define an update routine for our counter.
+#[derive(Default)]
+struct CounterUpdate;
+
+impl Update for CounterUpdate {
+    // These types should match the D and I types passed to the builder.
+    type D = i32;
+    type I = i32;
+
+    // This routine is called anytime a transition is taken.
+    fn update(&self, data: Self::D, input: &Self::I) -> Self::D {
+        // Here we accumulate inputs, *counting* the total.
+        data + input
+    }
+}
 
 fn main() {
     // Prints INFO events to STDOUT.
     tracing_subscriber::fmt::init();
 
     // Define a new machine via MachineBuilder that accepts i32 as input and operates on i32 as data.
-    let machine = MachineBuilder::<i32, i32>::new()
+    let machine = MachineBuilder::<i32, i32, CounterUpdate>::new()
         // Add a single self-looping transition.
         .with_transition(
             "Count",
             Transition {
                 // Here we indicate the self-loop.
                 s_out: "Count".into(),
-
-                // These two function can be used to selectively take this transition based on the current input and data.
-                validate: |_| true,
-                enable: |_| true,
-
-                // Everytime we are in this state and recieve an input, add it to counter.
-                update: |counter, input| counter + input,
-
-                // Fill out the rest of the transition with default values.
                 ..Default::default()
             },
         )
