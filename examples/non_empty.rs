@@ -21,19 +21,11 @@ fn main() {
                 validate: |letter| *letter == b'c',
                 update: |r1, _| r1 + 1,
 
-                // All bounds are strict.
-                //
-                // Justification:
-                // Any bound over u32 defined with inclusive operators can also be defined using strict operators.
-                // In the edge case (e.g., 0 <= r1), we simply ignore the bound by using None.
-                // In other words, a lower bound of None is equivalent to 0 <= r1.
-                // Conversely, an upper bound of None is equivalent to r1 <= u32::MAX.
+                // Here we explicitly set the bounds, which is not required due to ..Default::default pattern below.
+                // Since many transitions may not have bounds, we consider this the default.
+                // If a member is not explicitly set in the constructor, ..Default::default will fill it with the default value.
                 bound: TransitionBound::unbounded(),
 
-                // Here we explicitly set the bounds.
-                // Since many transitions may not have bounds, we consider this the default.
-                // If a member is not explicitly set in the constructor, ..Default::default will
-                // fill it with the default value.
                 ..Default::default()
             },
         )
@@ -57,10 +49,17 @@ fn main() {
                 enable: |r1| *r1 < 8,
                 update: |r1, _| r1 + 4,
 
-                // Here we explicitly set the bounds.
+                // All bounds are inclusive.
+                //
+                // Justification:
+                // Any bound over u32 defined with strict operators can also be defined using inclusive operators.
+                //
+                // What does None imply?
+                // A lower bound of None is equivalent to 0 <= r1.
+                // Conversely, an upper bound of None is equivalent to r1 <= u32::MAX.
                 bound: TransitionBound {
-                    lower: Some(8),
-                    upper: None,
+                    lower: None,
+                    upper: Some(7),
                 },
                 ..Default::default()
             },
@@ -70,10 +69,13 @@ fn main() {
             Transition {
                 s_out: "s0".into(),
                 validate: |letter| *letter == b'd',
-                enable: |r1| *r1 >= 8,
+                enable: |r1| 8 <= *r1,
+
+                // Notice that the bound is converted to a strict representation.
+                // We express r1 >= 8 as r1 > 7.
                 bound: TransitionBound {
-                    lower: None,
-                    upper: Some(9),
+                    lower: Some(8),
+                    upper: None,
                 },
                 ..Default::default()
             },
@@ -96,6 +98,9 @@ fn main() {
 }
 
 fn non_empty_states(machine: &Machine<u32, u8>, s_init: &str) -> HashSet<String> {
+    // TODO: Check that the machine is actually non-deterministic.
+    // The following algorithm is only correct in that case.
+
     let mut non_empty = machine.get_accepting();
     walk_transitions(
         machine,

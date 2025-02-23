@@ -99,6 +99,8 @@ impl<D, I> Default for Transition<D, I> {
     }
 }
 
+/// Inclusive bound over type D.
+#[derive(Debug, PartialEq)]
 pub struct TransitionBound<D> {
     pub lower: Option<D>,
     pub upper: Option<D>,
@@ -106,6 +108,9 @@ pub struct TransitionBound<D> {
 
 impl<D> TransitionBound<D> {
     pub fn unbounded() -> Self {
+        // A bound of None indicates there is no bound.
+        // This is useful when implementations do not care about bounding D.
+        // If we force D to implement Ord, then this might change.
         TransitionBound {
             lower: None,
             upper: None,
@@ -113,15 +118,65 @@ impl<D> TransitionBound<D> {
     }
 }
 
+// TODO: Can we just require Ord?
 impl TransitionBound<u32> {
+    // Replaces None with an explict value.
+    // This value depends on which generic type we are implementing.
+    // For u32, we use [0, std::u32::MAX] as the absolute bounds.
+    fn as_explicit(&self) -> (u32, u32) {
+        let lower = match self.lower {
+            Some(lower) => lower,
+            None => 0,
+        };
+
+        let upper = match self.upper {
+            Some(upper) => upper,
+            None => std::u32::MAX,
+        };
+
+        (lower, upper)
+    }
+
+    // Replaces absolute bounds with None.
+    // Inverse operation of as_explicit.
+    // TODO: Can we implement this using From<(u32, u32)>?
+    fn from_explicit(bound: (u32, u32)) -> Self {
+        let lower = Some(bound.0)
+            // Set lower to None if it's equal to zero.
+            .filter(|b| *b != 0);
+
+        let upper = Some(bound.1)
+            // Set upper to None if it's equal to u32 MAX.
+            .filter(|b| *b != std::u32::MAX);
+
+        TransitionBound { lower, upper }
+    }
+
+    /// Returns inclusive intersection if it exists.
+    /// Otherwise, returns None.
+    ///
+    /// ```
+    /// use rust_efsm::TransitionBound;
+    ///
+    /// let a = TransitionBound { lower: Some(10), upper: None };
+    /// let b = TransitionBound { lower: None, upper: Some(15) };
+    /// let c = TransitionBound { lower: None, upper: None };
+    ///
+    /// assert!(a.intersect(&b) == Some(TransitionBound { lower: Some(10), upper: Some(15) }));
+    /// assert!(a.intersect(&c) == Some(TransitionBound { lower: Some(10), upper: None }));
+    /// assert!(b.intersect(&c) == Some(TransitionBound { lower: None, upper: Some(15) }));
+    /// ```
     pub fn intersect(&self, other: &Self) -> Option<Self> {
-        if self.lower > other.upper || self.upper < other.lower {
+        let (s_lower, s_upper) = self.as_explicit();
+        let (o_lower, o_upper) = other.as_explicit();
+
+        if s_lower > o_upper || s_upper < o_lower {
             None
         } else {
-            Some(TransitionBound {
-                lower: max(self.lower, other.lower),
-                upper: min(self.upper, other.upper),
-            })
+            Some(TransitionBound::from_explicit((
+                max(s_lower, o_lower),
+                min(s_upper, o_upper),
+            )))
         }
     }
 }
@@ -238,5 +293,48 @@ impl<D: Default + Clone + Debug, I: Debug> MachineBuilder<D, I> {
     pub fn build(self) -> Machine<D, I> {
         info!("build machine with {} states", self.states.keys().len());
         Machine::new(self.states, self.accepting)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transition_bound_as_explicit() {
+        let a = TransitionBound {
+            lower: Some(10),
+            upper: None,
+        };
+
+        let b = TransitionBound {
+            lower: None,
+            upper: Some(15),
+        };
+
+        assert!(a.as_explicit() == (10, std::u32::MAX));
+        assert!(b.as_explicit() == (0, 15));
+    }
+
+    #[test]
+    fn transition_bound_from_explicit() {
+        let a = (10, std::u32::MAX);
+        let b = (0, 15);
+
+        assert!(
+            TransitionBound::from_explicit(a)
+                == TransitionBound {
+                    lower: Some(10),
+                    upper: None,
+                }
+        );
+
+        assert!(
+            TransitionBound::from_explicit(b)
+                == TransitionBound {
+                    lower: None,
+                    upper: Some(15),
+                }
+        );
     }
 }
