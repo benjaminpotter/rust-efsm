@@ -63,38 +63,33 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use tracing::info;
 
-type Validate<I> = fn(&I) -> bool;
-type Enable<D> = fn(&D) -> bool;
-type Update<D, I> = fn(D, &I) -> D;
+type Enable<D, I> = fn(&D, &I) -> bool;
+
+pub trait Update {
+    type D;
+    type I;
+
+    fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
+}
 
 /// Describes a single transition relation.
 ///
 /// # Generics
 /// A transition's validate, enable, and update functions take generic types D and I. These types are expected to be defined by the user and represent the configuration and input data respectively.
-pub struct Transition<D, I> {
-    // Checks if the given input satisfies transition relation.
-    pub validate: Validate<I>,
-
-    // Checks if current configuration satisfies transition relation.
-    pub enable: Enable<D>,
-
-    pub bound: TransitionBound<D>,
-
-    // Refers to the next state.
+pub struct Transition<D, I, U> {
     pub s_out: String,
-
-    // Updates current configuration on a transition.
-    pub update: Update<D, I>,
+    pub enable: Enable<D, I>,
+    pub bound: TransitionBound<D>,
+    pub update: U,
 }
 
-impl<D, I> Default for Transition<D, I> {
+impl<D, I, U: Default> Default for Transition<D, I, U> {
     fn default() -> Self {
         Transition {
-            validate: |_| true,
-            enable: |_| true,
-            bound: TransitionBound::unbounded(),
             s_out: "default".into(),
-            update: |d, _| d,
+            enable: |_, _| true,
+            bound: TransitionBound::unbounded(),
+            update: Default::default(),
         }
     }
 }
@@ -152,6 +147,31 @@ impl TransitionBound<u32> {
         TransitionBound { lower, upper }
     }
 
+    /// Returns a copy of self but shifted by amount.
+    ///
+    /// ```
+    /// use rust_efsm::TransitionBound;
+    ///
+    /// let a = TransitionBound { lower: Some(10), upper: None };
+    /// let b = TransitionBound { lower: None, upper: Some(15) };
+    /// let c = TransitionBound { lower: Some(10), upper: Some(std::u32::MAX) };
+    ///
+    /// assert!(a.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
+    /// assert!(b.shifted_by(5) == TransitionBound { lower: Some(5), upper: Some(20) });
+    /// assert!(c.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
+    /// ```
+    pub fn shifted_by(&self, amount: u32) -> Self {
+        let (lower, upper) = self.as_explicit();
+        TransitionBound {
+            // If overflow, panic.
+            lower: Some(lower + amount),
+
+            // If overflow, checked_add will return None.
+            // Since None indicates no upper bound, going above u32 MAX should result in None.
+            upper: upper.checked_add(amount),
+        }
+    }
+
     /// Returns inclusive intersection if it exists.
     /// Otherwise, returns None.
     ///
@@ -192,16 +212,16 @@ struct Block<D> {
 /// # See also
 ///
 /// * [MachineBuilder]
-pub struct Machine<D, I> {
+pub struct Machine<D, I, U> {
     // Represents the directed graph of states and transitions.
-    states: HashMap<String, Vec<Transition<D, I>>>,
+    states: HashMap<String, Vec<Transition<D, I, U>>>,
 
     // Represents accepting states.
     accepting: HashSet<String>,
 }
 
-impl<D: Clone + Debug, I: Debug> Machine<D, I> {
-    fn new(states: HashMap<String, Vec<Transition<D, I>>>, accepting: HashSet<String>) -> Self {
+impl<D: Clone + Debug, I: Debug, U: Update<D = D, I = I>> Machine<D, I, U> {
+    fn new(states: HashMap<String, Vec<Transition<D, I, U>>>, accepting: HashSet<String>) -> Self {
         Machine { states, accepting }
     }
 
@@ -209,7 +229,7 @@ impl<D: Clone + Debug, I: Debug> Machine<D, I> {
         self.accepting.clone()
     }
 
-    pub fn get_transitions(&self, s: &str) -> Option<&Vec<Transition<D, I>>> {
+    pub fn get_transitions(&self, s: &str) -> Option<&Vec<Transition<D, I, U>>> {
         self.states.get(s)
     }
 
@@ -239,8 +259,8 @@ impl<D: Clone + Debug, I: Debug> Machine<D, I> {
         for (state, data) in b.configs {
             if let Some(transitions) = self.states.get(&state) {
                 for transition in transitions {
-                    if (transition.validate)(&i) && (transition.enable)(&data) {
-                        let data = (transition.update)(data.clone(), i);
+                    if (transition.enable)(&data, &i) {
+                        let data = transition.update.update(data.clone(), i);
                         configs.push((transition.s_out.clone(), data));
                     }
                 }
@@ -259,12 +279,12 @@ impl<D: Clone + Debug, I: Debug> Machine<D, I> {
 }
 
 /// Helps with specifying [Machines](Machine).
-pub struct MachineBuilder<D, I> {
-    states: HashMap<String, Vec<Transition<D, I>>>,
+pub struct MachineBuilder<D, I, U> {
+    states: HashMap<String, Vec<Transition<D, I, U>>>,
     accepting: HashSet<String>,
 }
 
-impl<D: Default + Clone + Debug, I: Debug> MachineBuilder<D, I> {
+impl<D: Default + Clone + Debug, I: Debug, U: Update<D = D, I = I>> MachineBuilder<D, I, U> {
     /// Create a new machine builder.
     pub fn new() -> Self {
         MachineBuilder {
@@ -274,7 +294,7 @@ impl<D: Default + Clone + Debug, I: Debug> MachineBuilder<D, I> {
     }
 
     /// Add a transition from state `s_in`.
-    pub fn with_transition(mut self, s_in: &str, t: Transition<D, I>) -> Self {
+    pub fn with_transition(mut self, s_in: &str, t: Transition<D, I, U>) -> Self {
         info!(
             "add transition from state '{}' to state '{}'",
             s_in, t.s_out
@@ -290,7 +310,7 @@ impl<D: Default + Clone + Debug, I: Debug> MachineBuilder<D, I> {
     }
 
     /// Create and return a new machine from the current specification.
-    pub fn build(self) -> Machine<D, I> {
+    pub fn build(self) -> Machine<D, I, U> {
         info!("build machine with {} states", self.states.keys().len());
         Machine::new(self.states, self.accepting)
     }

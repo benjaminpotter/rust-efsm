@@ -1,7 +1,27 @@
-use rust_efsm::{Machine, MachineBuilder, Transition, TransitionBound};
+use rust_efsm::{Machine, MachineBuilder, Transition, TransitionBound, Update};
 use std::collections::HashSet;
 use std::u32;
 use tracing::info;
+
+#[derive(Default)]
+struct AddUpdate {
+    amount: u32,
+}
+
+impl Update for AddUpdate {
+    type D = u32;
+    type I = u8;
+
+    fn update(&self, data: Self::D, input: &Self::I) -> Self::D {
+        data + self.amount
+    }
+}
+
+impl From<u32> for AddUpdate {
+    fn from(amount: u32) -> Self {
+        AddUpdate { amount }
+    }
+}
 
 fn main() {
     // Prints INFO events to STDOUT.
@@ -9,7 +29,7 @@ fn main() {
 
     // Define a machine following the specification from the first example in the assignment.
     // Machine operates on a u32 register with u8 (ASCII) input.
-    let machine = MachineBuilder::<u32, u8>::new()
+    let machine = MachineBuilder::<u32, u8, AddUpdate>::new()
         // Define a transition from s0 to s1,
         // where input is a 'c',
         // there are no bounds on the transition,
@@ -18,8 +38,11 @@ fn main() {
             "s0",
             Transition {
                 s_out: "s1".into(),
-                validate: |letter| *letter == b'c',
-                update: |r1, _| r1 + 1,
+                enable: |_, letter| *letter == b'c',
+
+                // Because the From<u32> trait is implemented for AddUpdate, the compiler will know
+                // that a 1 here actually means AddUpdate { amount: 1 }.
+                update: 1.into(),
 
                 // Here we explicitly set the bounds, which is not required due to ..Default::default pattern below.
                 // Since many transitions may not have bounds, we consider this the default.
@@ -33,7 +56,7 @@ fn main() {
             "s0",
             Transition {
                 s_out: "s0".into(),
-                validate: |letter| *letter == b'b',
+                enable: |_, letter| *letter == b'b',
 
                 // Notice the omission of certain members which get the default.
                 ..Default::default()
@@ -45,9 +68,8 @@ fn main() {
             "s1",
             Transition {
                 s_out: "s1".into(),
-                validate: |letter| *letter == b'a',
-                enable: |r1| *r1 < 8,
-                update: |r1, _| r1 + 4,
+                enable: |_, letter| *letter == b'a',
+                update: 4.into(),
 
                 // All bounds are inclusive.
                 //
@@ -68,8 +90,7 @@ fn main() {
             "s1",
             Transition {
                 s_out: "s0".into(),
-                validate: |letter| *letter == b'd',
-                enable: |r1| 8 <= *r1,
+                enable: |_, letter| *letter == b'd',
 
                 // Notice that the bound is converted to a strict representation.
                 // We express r1 >= 8 as r1 > 7.
@@ -84,7 +105,7 @@ fn main() {
             "s1",
             Transition {
                 s_out: "s1".into(),
-                validate: |letter| *letter == b't',
+                enable: |data, letter| *letter == b't',
                 ..Default::default()
             },
         )
@@ -94,10 +115,12 @@ fn main() {
     let non_empty = non_empty_states(&machine, "s0");
     info!("found non-empty states {:?}", non_empty);
 
-    assert!(non_empty == HashSet::<String>::from(["s0".into(), "s1".into()]))
+    assert!(non_empty == HashSet::<String>::from(["s0".into(), "s1".into()]));
+
+    machine.exec("s0", 2, vec![b'c', b'a', b't']);
 }
 
-fn non_empty_states(machine: &Machine<u32, u8>, s_init: &str) -> HashSet<String> {
+fn non_empty_states(machine: &Machine<u32, u8, AddUpdate>, s_init: &str) -> HashSet<String> {
     // TODO: Check that the machine is actually non-deterministic.
     // The following algorithm is only correct in that case.
 
@@ -115,7 +138,7 @@ fn non_empty_states(machine: &Machine<u32, u8>, s_init: &str) -> HashSet<String>
 }
 
 fn walk_transitions(
-    machine: &Machine<u32, u8>,
+    machine: &Machine<u32, u8, AddUpdate>,
     non_empty: &mut HashSet<String>,
     mut path: Vec<String>,
     curr: String,
@@ -148,12 +171,14 @@ fn walk_transitions(
             // Apply the intersection of the range,
             // If the intersection is non-zero,
             if let Some(intersection) = transition.bound.intersect(&interval) {
+                let interval = intersection.shifted_by(transition.update.amount);
+
                 walk_transitions(
                     machine,
                     non_empty,
                     path.clone(),
                     transition.s_out.clone(),
-                    intersection,
+                    interval,
                     depth + 1,
                 );
             }
