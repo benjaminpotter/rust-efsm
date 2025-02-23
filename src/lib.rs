@@ -16,32 +16,38 @@
 //!
 //! tracing_subscriber::fmt::init();
 //!
-//! let machine = MachineBuilder::new()
-//!     .with_transition("init", Transition::new(
-//!         |i: &u32| { *i != 1 },
-//!         |d: &u32| { true },
-//!         "init",
-//!         |d: u32, _| { d }))
-//!     .with_transition("init", Transition::new(   // Begin a new transition,
-//!         |i: &u32| { *i == 1 },                  // continue if input is one,
-//!         |d: &u32| { *d != 2 },                  // continue if counter is not two,
-//!         "init",                                 // transition to init,
-//!         |d, _| { d + 1 }))                      // increment counter.
-//!     .with_transition("init", Transition::new(
-//!         |i: &u32| { *i == 1 },
-//!         |d: &u32| { *d == 2 },
-//!         "accept",
-//!         |d: u32, _| { d + 1 }))
-//!     .with_transition("accept", Transition::new(
-//!         |i: &u32| { *i != 0 },
-//!         |d: &u32| { true },
-//!         "accept",
-//!         |d: u32, _| { d + 1 }))
-//!     .with_transition("accept", Transition::new(
-//!         |i: &u32| { *i == 1 },
-//!         |d: &u32| { true },
-//!         "init",
-//!         |d: u32, _| { d + 1 }))
+//! let machine = MachineBuilder::<u32, u32>::new()
+//!     .with_transition("init", Transition {
+//!         s_out: "init".into(),
+//!         validate: |i| *i != 1,
+//!         ..Default::default()
+//!     })
+//!     .with_transition("init", Transition {   // Begin a new transition,
+//!         s_out: "init".into(),               // transition to init,
+//!         validate: |i| *i == 1,              // continue if input is one,
+//!         enable: |d| *d != 2,                // continue if counter is not two,
+//!         update: |d, _|  d + 1,              // increment counter.
+//!         ..Default::default()
+//!     })
+//!     .with_transition("init", Transition {
+//!         s_out: "accept".into(),
+//!         validate: |i| *i == 1,
+//!         enable: |d| *d == 2,
+//!         update: |d, _| d + 1,
+//!         ..Default::default()
+//!     })
+//!     .with_transition("accept", Transition {
+//!         s_out: "accept".into(),
+//!         validate: |i|  *i != 0,
+//!         update: |d, _| d + 1,
+//!         ..Default::default()
+//!     })
+//!     .with_transition("accept", Transition {
+//!         s_out: "init".into(),
+//!         validate: |i| *i == 1,
+//!         update: |d, _| d + 1,
+//!         ..Default::default()
+//!     })
 //!     .with_accepting("accept")
 //!     .build();
 //!
@@ -52,6 +58,7 @@
 //!
 //! \[1\] Cheng, K.-T. & Krishnakumar, A. Automatic Functional Test Generation Using The Extended Finite State Machine Model.
 
+use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use tracing::info;
@@ -66,31 +73,55 @@ type Update<D, I> = fn(D, &I) -> D;
 /// A transition's validate, enable, and update functions take generic types D and I. These types are expected to be defined by the user and represent the configuration and input data respectively.
 pub struct Transition<D, I> {
     // Checks if the given input satisfies transition relation.
-    validate: Validate<I>,
+    pub validate: Validate<I>,
 
     // Checks if current configuration satisfies transition relation.
-    enable: Enable<D>,
+    pub enable: Enable<D>,
+
+    pub bound: TransitionBound<D>,
 
     // Refers to the next state.
-    s_out: String,
+    pub s_out: String,
 
     // Updates current configuration on a transition.
-    update: Update<D, I>,
+    pub update: Update<D, I>,
 }
 
-impl<D, I> Transition<D, I> {
-    /// Create a new transition to `s_out` that applies `update` when `validate` and `enable` return true.
-    pub fn new(
-        validate: Validate<I>,
-        enable: Enable<D>,
-        s_out: &str,
-        update: Update<D, I>,
-    ) -> Self {
+impl<D, I> Default for Transition<D, I> {
+    fn default() -> Self {
         Transition {
-            validate,
-            enable,
-            s_out: s_out.into(),
-            update,
+            validate: |_| true,
+            enable: |_| true,
+            bound: TransitionBound::unbounded(),
+            s_out: "default".into(),
+            update: |d, _| d,
+        }
+    }
+}
+
+pub struct TransitionBound<D> {
+    pub lower: Option<D>,
+    pub upper: Option<D>,
+}
+
+impl<D> TransitionBound<D> {
+    pub fn unbounded() -> Self {
+        TransitionBound {
+            lower: None,
+            upper: None,
+        }
+    }
+}
+
+impl TransitionBound<u32> {
+    pub fn intersect(&self, other: &Self) -> Option<Self> {
+        if self.lower > other.upper || self.upper < other.lower {
+            None
+        } else {
+            Some(TransitionBound {
+                lower: max(self.lower, other.lower),
+                upper: min(self.upper, other.upper),
+            })
         }
     }
 }
@@ -119,10 +150,15 @@ impl<D: Default + Clone + Debug, I: Debug> Machine<D, I> {
         Machine { states, accepting }
     }
 
+    pub fn get_accepting(&self) -> HashSet<String> {
+        self.accepting.clone()
+    }
+
+    pub fn get_transitions(&self, s: &str) -> Option<&Vec<Transition<D, I>>> {
+        self.states.get(s)
+    }
+
     /// Checks if the input sequence `is` belongs to the language defined by this machine.
-    ///
-    /// # Panics
-    /// This function will panic if it discovers that the machine specification is invalid.
     pub fn exec(&self, s_init: &str, is: Vec<I>) -> bool {
         info!("executing input sequence");
 

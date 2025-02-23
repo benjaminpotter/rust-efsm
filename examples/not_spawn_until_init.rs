@@ -15,23 +15,34 @@ enum Ap {
 
 fn main() {
     tracing_subscriber::fmt::init();
-    
+
     let machine = MachineBuilder::<bool, Ap>::new()
-        .with_transition("Accept", Transition::new(
-                |i| { *i == Ap::Other },
-                |_| { true },
-                "Accept",
-                |is_init, _| { is_init }))
-        .with_transition("Accept", Transition::new(
-                |i| { *i == Ap::Init },
-                |_| { true },
-                "Accept",
-                |_, _| { true }))
-        .with_transition("Accept", Transition::new(
-                |i| { *i == Ap::Spawn },
-                |is_init| { *is_init },
-                "Accept",
-                |_, _| { true }))
+        .with_transition(
+            "Accept",
+            Transition {
+                s_out: "Accept".into(),
+                validate: |i| *i == Ap::Other,
+                update: |is_init, _| is_init,
+                ..Default::default()
+            },
+        )
+        .with_transition(
+            "Accept",
+            Transition {
+                s_out: "Accept".into(),
+                validate: |i| *i == Ap::Init,
+                ..Default::default()
+            },
+        )
+        .with_transition(
+            "Accept",
+            Transition {
+                s_out: "Accept".into(),
+                validate: |i| *i == Ap::Spawn,
+                enable: |is_init| *is_init,
+                ..Default::default()
+            },
+        )
         .with_accepting("Accept")
         .build();
 
