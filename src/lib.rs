@@ -65,6 +65,11 @@ use tracing::info;
 
 type Enable<D, I> = fn(&D, &I) -> bool;
 
+/// Creates a D based on information from an existing D and a new I.
+/// It can also use an immutable reference to self.
+///
+/// It is similar to Enable, because it is called during a transition.
+/// However, the Update function may store read-only state.
 pub trait Update {
     type D;
     type I;
@@ -73,9 +78,6 @@ pub trait Update {
 }
 
 /// Describes a single transition relation.
-///
-/// # Generics
-/// A transition's validate, enable, and update functions take generic types D and I. These types are expected to be defined by the user and represent the configuration and input data respectively.
 pub struct Transition<D, I, U> {
     pub s_out: String,
     pub enable: Enable<D, I>,
