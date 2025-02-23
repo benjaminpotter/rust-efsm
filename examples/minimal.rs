@@ -30,5 +30,5 @@ fn main() {
         .build();
 
     // Execute the machine on the input sequence <1, 2, 3>.
-    assert!(machine.exec("Count", vec![1, 2, 3]));
+    assert!(machine.exec("Count", 0, vec![1, 2, 3]));
 }

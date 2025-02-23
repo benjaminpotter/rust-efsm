@@ -51,7 +51,7 @@
 //!     .with_accepting("accept")
 //!     .build();
 //!
-//! assert!(machine.exec("init", vec![3, 1, 1, 1, 10, 8]));
+//! assert!(machine.exec("init", 0, vec![3, 1, 1, 1, 10, 8]));
 //! ```
 //!
 //! # References
@@ -200,7 +200,7 @@ pub struct Machine<D, I> {
     accepting: HashSet<String>,
 }
 
-impl<D: Default + Clone + Debug, I: Debug> Machine<D, I> {
+impl<D: Clone + Debug, I: Debug> Machine<D, I> {
     fn new(states: HashMap<String, Vec<Transition<D, I>>>, accepting: HashSet<String>) -> Self {
         Machine { states, accepting }
     }
@@ -214,11 +214,11 @@ impl<D: Default + Clone + Debug, I: Debug> Machine<D, I> {
     }
 
     /// Checks if the input sequence `is` belongs to the language defined by this machine.
-    pub fn exec(&self, s_init: &str, is: Vec<I>) -> bool {
+    pub fn exec(&self, s_init: &str, d_init: D, is: Vec<I>) -> bool {
         info!("executing input sequence");
 
         let mut b = Block {
-            configs: vec![(s_init.into(), Default::default())],
+            configs: vec![(s_init.into(), d_init)],
         };
 
         for i in is {

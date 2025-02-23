@@ -47,9 +47,17 @@ fn main() {
         .build();
 
     // Should accept.
-    assert!(machine.exec("Accept", vec![Ap::Other, Ap::Init, Ap::Spawn]));
-    assert!(machine.exec("Accept", vec![Ap::Init, Ap::Other, Ap::Spawn, Ap::Other]));
+    assert!(machine.exec("Accept", false, vec![Ap::Other, Ap::Init, Ap::Spawn]));
+    assert!(machine.exec(
+        "Accept",
+        false,
+        vec![Ap::Init, Ap::Other, Ap::Spawn, Ap::Other]
+    ));
 
     // Should reject.
-    assert!(machine.exec("Accept", vec![Ap::Spawn, Ap::Other, Ap::Other, Ap::Init]));
+    assert!(machine.exec(
+        "Accept",
+        false,
+        vec![Ap::Spawn, Ap::Other, Ap::Other, Ap::Init]
+    ));
 }
