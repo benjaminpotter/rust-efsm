@@ -162,12 +162,20 @@ impl TransitionBound<u32> {
 }
 
 #[derive(Debug)]
-struct Block<D> {
-    configs: Vec<(String, D)>,
+struct Location<D> {
+    // TODO: Right now state=location and location=state, we need to swap them.
+    state: String,
+    data: D,
 }
 
-/// Describes an EFSM and subsequently a regular language. In most cases, use the
-/// [builder](MachineBuilder) to specify a machine.
+impl<D> From<Location<D>> for (String, D) {
+    fn from(loc: Location<D>) -> (String, D) {
+        (loc.state, loc.data)
+    }
+}
+
+/// Describes an EFSM.
+/// In most cases, use the [builder](MachineBuilder) to specify a machine.
 ///
 /// # See also
 ///
@@ -197,44 +205,44 @@ impl<D: Clone + Debug, I: Debug, U: Update<D = D, I = I>> Machine<D, I, U> {
     pub fn exec(&self, s_init: &str, d_init: D, is: Vec<I>) -> bool {
         info!("executing input sequence");
 
-        let mut b = Block {
-            configs: vec![(s_init.into(), d_init)],
-        };
+        let mut locations = vec![Location {
+            state: s_init.into(),
+            data: d_init,
+        }];
 
         for i in is {
             info!("received input {:?}", i);
-            info!("from block {:?}", b);
+            info!("from locations {:?}", locations);
 
-            b = self.transition(&i, b);
+            locations = self.transition(&i, locations);
 
-            info!("to block {:?}", b);
+            info!("to locations {:?}", locations);
         }
 
         info!("reached end of input");
-        self.block_accepts(b)
+        locations
+            .iter()
+            .map(|loc| self.accepting.contains(&loc.state))
+            .fold(false, |acc, accept| acc || accept)
     }
 
-    fn transition(&self, i: &I, b: Block<D>) -> Block<D> {
-        let mut configs: Vec<(String, D)> = Vec::new();
-        for (state, data) in b.configs {
+    fn transition(&self, i: &I, locations: Vec<Location<D>>) -> Vec<Location<D>> {
+        let mut next_locs: Vec<Location<D>> = Vec::new();
+        for (state, data) in locations.into_iter().map(|loc| loc.into()) {
             if let Some(transitions) = self.states.get(&state) {
                 for transition in transitions {
                     if (transition.enable)(&data, &i) {
                         let data = transition.update.update(data.clone(), i);
-                        configs.push((transition.s_out.clone(), data));
+                        next_locs.push(Location {
+                            state: transition.s_out.clone(),
+                            data,
+                        });
                     }
                 }
             }
         }
 
-        Block { configs }
-    }
-
-    fn block_accepts(&self, b: Block<D>) -> bool {
-        b.configs
-            .iter()
-            .map(|(state, _)| self.accepting.contains(state))
-            .fold(false, |acc, accept| acc || accept)
+        next_locs
     }
 }
 
