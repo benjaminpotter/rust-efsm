@@ -12,7 +12,7 @@ impl Update for AddUpdate {
     type D = u32;
     type I = u8;
 
-    fn update(&self, data: Self::D, input: &Self::I) -> Self::D {
+    fn update(&self, data: Self::D, _input: &Self::I) -> Self::D {
         data + self.amount
     }
 }
@@ -105,7 +105,7 @@ fn main() {
             "s1",
             Transition {
                 s_out: "s1".into(),
-                enable: |data, letter| *letter == b't',
+                enable: |_, letter| *letter == b't',
                 ..Default::default()
             },
         )

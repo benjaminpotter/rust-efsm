@@ -38,3 +38,18 @@ Please reference the examples for more detailed information about usage.
 You will also find useful examples are embedded into the documentation.
 They are not provided here to minimize the chance of an outdated example.
 
+#### Visualizing Machines
+This library supports the DOT graph description language.
+It can encode a machine defined in rust-efsm as a automaton-style graph automatically.
+
+```rust
+std::fs::write("graph.gv", machine.get_dot_buffer()).unwrap();
+```
+
+The DOT language can be interpreted to create a visualization using existing tools.
+The following code snippet uses the linux utility dot to layout a postscript file.
+
+```bash
+dot -Tps graph.gv -o graph.ps
+```
+

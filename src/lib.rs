@@ -11,7 +11,7 @@
 
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use tracing::info;
 
 type Enable<D, I> = fn(&D, &I) -> bool;
@@ -37,6 +37,7 @@ pub trait Update {
 pub struct Transition<D, I, U> {
     pub s_out: String,
     pub enable: Enable<D, I>,
+    pub enable_hint: Option<String>,
     pub bound: TransitionBound<D>,
     pub update: U,
 }
@@ -46,6 +47,7 @@ impl<D, I, U: Default> Default for Transition<D, I, U> {
         Transition {
             s_out: "default".into(),
             enable: |_, _| true,
+            enable_hint: None,
             bound: TransitionBound::unbounded(),
             update: Default::default(),
         }
@@ -233,6 +235,63 @@ impl<D: Clone + Debug, I: Debug, U: Update<D = D, I = I>> Machine<D, I, U> {
             .iter()
             .map(|(state, _)| self.accepting.contains(state))
             .fold(false, |acc, accept| acc || accept)
+    }
+}
+
+impl<D, I, U: Display> Machine<D, I, U> {
+    // TODO: Abstract the conversion of a machine in memory to a static output.
+    // TODO: Getting a DOT buffer is one concrete implementation of this functionality.
+    // TODO: Another example would be decoding synthesizing the language that a machine implements.
+    pub fn get_dot_buffer(&self) -> Vec<u8> {
+        let mut buffer = String::new();
+
+        // Begin a new graph definition.
+        buffer.push_str("digraph machine {\n");
+        buffer.push_str("graph [center=true pad=.5];\n");
+        for (state, transitions) in &self.states {
+            // Double line for accepting states.
+            let peripheries = match self.accepting.contains(state) {
+                true => 2,
+                false => 1,
+            };
+
+            // Define all states as nodes.
+            buffer.push_str(&format!(
+                "{}[shape=circle,peripheries={}];\n",
+                state, peripheries
+            ));
+
+            // Define all transitions as directed edges.
+            for (transition, tailport) in transitions
+                .iter()
+                .zip(["e", "w", "n", "s", "ne", "sw", "nw", "se"].iter().cycle())
+            {
+                let label = format!(
+                    "<table border=\"0\"><tr><td><font>{}</font></td></tr> <tr><td bgcolor=\"black\"></td></tr> <tr><td><font>{}</font></td></tr></table>",
+                    transition.enable_hint.clone().unwrap_or("true".into()),
+                    transition.update
+                );
+
+                let def = match *state == transition.s_out {
+                    true => &format!(
+                        "{} -> {} [label=<{}>, tailport={}, headport={}];\n",
+                        state, transition.s_out, label, tailport, tailport
+                    ),
+                    false => &format!(
+                        "{} -> {} [label=<{}>, tailport={}];\n",
+                        state, transition.s_out, label, tailport
+                    ),
+                };
+
+                buffer.push_str(def);
+            }
+        }
+
+        // Close the graph definition block.
+        buffer.push_str("}\n");
+
+        // Return the completed graph definition as UTF-8 bytes.
+        buffer.into_bytes()
     }
 }
 

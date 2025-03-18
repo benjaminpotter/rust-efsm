@@ -24,7 +24,7 @@ impl Update for MachineUpdate {
     type D = bool;
     type I = Ap;
 
-    fn update(&self, data: Self::D, input: &Self::I) -> Self::D {
+    fn update(&self, data: Self::D, _input: &Self::I) -> Self::D {
         match self.0 {
             UpdateType::Identity => data,
             UpdateType::True => true,
