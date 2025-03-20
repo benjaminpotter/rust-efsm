@@ -55,7 +55,7 @@ fn main() {
             "Accept",
             Transition {
                 s_out: "Accept".into(),
-                enable: |d, i| *i == Ap::Init,
+                enable: |_, i| *i == Ap::Init,
                 ..Default::default()
             },
         )
