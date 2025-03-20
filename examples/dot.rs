@@ -1,3 +1,4 @@
+use rust_efsm::gviz::GvGraph;
 use rust_efsm::{MachineBuilder, Transition, Update};
 use std::fs::write;
 use std::{fmt, fmt::Display};
@@ -97,5 +98,6 @@ fn main() {
         .with_accepting("start")
         .build();
 
-    write("out.gv", machine.get_dot_buffer()).unwrap();
+    let gv: GvGraph = machine.into();
+    write::<_, String>("out.gv", gv.into()).unwrap();
 }
