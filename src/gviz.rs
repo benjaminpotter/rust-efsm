@@ -59,16 +59,17 @@ impl<D, I, U> From<Machine<D, I, U>> for GvGraph {
     fn from(machine: Machine<D, I, U>) -> Self {
         let mut gv = GvGraph::new();
 
-        for (state, transitions) in &machine.states {
+        // FIXME: Avoid using Machine's private API.
+        for (location, transitions) in &machine.locations {
             // Double line for accepting states.
-            let peripheries = match machine.accepting.contains(state) {
+            let peripheries = match machine.accepting.contains(location) {
                 true => 2,
                 false => 1,
             };
 
             // Each state gets a GvNode.
             gv.nodes.push(GvNode {
-                label: state.clone(),
+                label: location.clone(),
                 peripheries,
             });
 
@@ -81,8 +82,8 @@ impl<D, I, U> From<Machine<D, I, U>> for GvGraph {
                     // TODO: This requires that the machine outlives the graph.
                     // TODO: That requirement seems logical, and may be the best option.
                     // TODO: Further thought is required.
-                    head: state.clone(),
-                    tail: t.s_out.clone(),
+                    head: location.clone(),
+                    tail: t.to_location.clone(),
                 });
             }
         }

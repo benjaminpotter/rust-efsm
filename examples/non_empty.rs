@@ -1,4 +1,5 @@
-use rust_efsm::{Machine, MachineBuilder, Transition, TransitionBound, Update};
+use rust_efsm::mon::Monitor;
+use rust_efsm::{Machine, MachineBuilder, StateInterval, Transition, TransitionBound, Update};
 use std::collections::HashSet;
 use std::u32;
 use tracing::info;
@@ -14,6 +15,14 @@ impl Update for AddUpdate {
 
     fn update(&self, data: Self::D, _input: &Self::I) -> Self::D {
         data + self.amount
+    }
+
+    fn update_interval(&self, interval: TransitionBound<Self::D>) -> TransitionBound<Self::D> {
+        let (lower, upper) = interval.as_explicit();
+        TransitionBound {
+            lower: Some(lower + self.amount),
+            upper: upper.checked_add(self.amount),
+        }
     }
 }
 
@@ -37,7 +46,7 @@ fn main() {
         .with_transition(
             "s0",
             Transition {
-                s_out: "s1".into(),
+                to_location: "s1".into(),
                 enable: |_, letter| *letter == b'c',
 
                 // Because the From<u32> trait is implemented for AddUpdate, the compiler will know
@@ -55,7 +64,7 @@ fn main() {
         .with_transition(
             "s0",
             Transition {
-                s_out: "s0".into(),
+                to_location: "s0".into(),
                 enable: |_, letter| *letter == b'b',
 
                 // Notice the omission of certain members which get the default.
@@ -67,7 +76,7 @@ fn main() {
         .with_transition(
             "s1",
             Transition {
-                s_out: "s1".into(),
+                to_location: "s1".into(),
                 enable: |_, letter| *letter == b'a',
                 update: 4.into(),
 
@@ -89,7 +98,7 @@ fn main() {
         .with_transition(
             "s1",
             Transition {
-                s_out: "s0".into(),
+                to_location: "s0".into(),
                 enable: |_, letter| *letter == b'd',
 
                 // Notice that the bound is converted to a strict representation.
@@ -104,7 +113,7 @@ fn main() {
         .with_transition(
             "s1",
             Transition {
-                s_out: "s1".into(),
+                to_location: "s1".into(),
                 enable: |_, letter| *letter == b't',
                 ..Default::default()
             },
@@ -112,76 +121,10 @@ fn main() {
         .with_accepting("s1")
         .build();
 
-    let non_empty = non_empty_states(&machine, "s0");
-    info!("found non-empty states {:?}", non_empty);
+    // let monitor = Monitor::from_machine(machine).unwrap();
 
-    assert!(non_empty == HashSet::<String>::from(["s0".into(), "s1".into()]));
-
-    machine.exec("s0", 2, vec![b'c', b'a', b't']);
-}
-
-fn non_empty_states(machine: &Machine<u32, u8, AddUpdate>, s_init: &str) -> HashSet<String> {
-    // TODO: Check that the machine is actually non-deterministic.
-    // The following algorithm is only correct in that case.
-
-    let mut non_empty = machine.get_accepting();
-    walk_transitions(
-        machine,
-        &mut non_empty,
-        vec![],
-        s_init.into(),
-        TransitionBound::unbounded(),
-        0,
-    );
-
-    non_empty
-}
-
-fn walk_transitions(
-    machine: &Machine<u32, u8, AddUpdate>,
-    non_empty: &mut HashSet<String>,
-    mut path: Vec<String>,
-    curr: String,
-    interval: TransitionBound<u32>,
-    depth: u32,
-) {
-    // How do we handle cycles?
-    // Recursion limit?
-    if depth > 1000 {
-        return;
-    }
-
-    // If current is already in non-empty, then add all of path to non_empty.
-    if non_empty.contains(&curr) {
-        info!("found path {:?} to accepting state", path);
-        for state in path {
-            non_empty.insert(state);
-        }
-
-        return;
-    }
-
-    // If it isn't check for transitions out of this current state.
-    if let Some(transitions) = machine.get_transitions(&curr) {
-        // Append the current node to the path before recursing.
-        path.push(curr);
-
-        // Loop over all transitions on current,
-        for transition in transitions {
-            // Apply the intersection of the range,
-            // If the intersection is non-zero,
-            if let Some(intersection) = transition.bound.intersect(&interval) {
-                let interval = intersection.shifted_by(transition.update.amount);
-
-                walk_transitions(
-                    machine,
-                    non_empty,
-                    path.clone(),
-                    transition.s_out.clone(),
-                    interval,
-                    depth + 1,
-                );
-            }
-        }
-    }
+    dbg!(machine.find_sink_state_intervals_from(StateInterval {
+        location: "s0".into(),
+        interval: TransitionBound::unbounded(),
+    }));
 }

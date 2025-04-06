@@ -10,10 +10,13 @@
 //! \[1\] Cheng, K.-T. & Krishnakumar, A. Automatic Functional Test Generation Using The Extended Finite State Machine Model.
 
 pub mod gviz;
+pub mod mon;
 
+use num::Bounded;
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
+use std::hash::Hash;
 use tracing::info;
 
 type Enable<D, I> = fn(&D, &I) -> bool;
@@ -33,13 +36,13 @@ pub trait Update {
     // NOTE: I think the trade off is between suffering dynamic disbatch to enable different
     // updates or using generics but only get one update struct.
     fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
+    fn update_interval(&self, interval: TransitionBound<Self::D>) -> TransitionBound<Self::D>;
 }
 
 /// Describes a single transition relation.
 pub struct Transition<D, I, U> {
-    pub s_out: String,
+    pub to_location: String,
     pub enable: Enable<D, I>,
-    pub enable_hint: Option<String>,
     pub bound: TransitionBound<D>,
     pub update: U,
 }
@@ -47,9 +50,8 @@ pub struct Transition<D, I, U> {
 impl<D, I, U: Default> Default for Transition<D, I, U> {
     fn default() -> Self {
         Transition {
-            s_out: "default".into(),
+            to_location: "default".into(),
             enable: |_, _| true,
-            enable_hint: None,
             bound: TransitionBound::unbounded(),
             update: Default::default(),
         }
@@ -57,7 +59,7 @@ impl<D, I, U: Default> Default for Transition<D, I, U> {
 }
 
 /// Inclusive bound over type D.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TransitionBound<D> {
     pub lower: Option<D>,
     pub upper: Option<D>,
@@ -75,20 +77,22 @@ impl<D> TransitionBound<D> {
     }
 }
 
-// TODO: Can we just require Ord?
-impl TransitionBound<u32> {
+impl<D> TransitionBound<D>
+where
+    D: PartialOrd + Ord + Bounded + Copy,
+{
     // Replaces None with an explict value.
     // This value depends on which generic type we are implementing.
     // For u32, we use [0, std::u32::MAX] as the absolute bounds.
-    fn as_explicit(&self) -> (u32, u32) {
+    pub fn as_explicit(&self) -> (D, D) {
         let lower = match self.lower {
             Some(lower) => lower,
-            None => 0,
+            None => D::min_value(),
         };
 
         let upper = match self.upper {
             Some(upper) => upper,
-            None => std::u32::MAX,
+            None => D::max_value(),
         };
 
         (lower, upper)
@@ -96,43 +100,42 @@ impl TransitionBound<u32> {
 
     // Replaces absolute bounds with None.
     // Inverse operation of as_explicit.
-    // TODO: Can we implement this using From<(u32, u32)>?
-    fn from_explicit(bound: (u32, u32)) -> Self {
+    fn from_explicit(bound: (D, D)) -> Self {
         let lower = Some(bound.0)
             // Set lower to None if it's equal to zero.
-            .filter(|b| *b != 0);
+            .filter(|b| !(*b == D::min_value()));
 
         let upper = Some(bound.1)
             // Set upper to None if it's equal to u32 MAX.
-            .filter(|b| *b != std::u32::MAX);
+            .filter(|b| !(*b == D::max_value()));
 
         TransitionBound { lower, upper }
     }
 
-    /// Returns a copy of self but shifted by amount.
-    ///
-    /// ```
-    /// use rust_efsm::TransitionBound;
-    ///
-    /// let a = TransitionBound { lower: Some(10), upper: None };
-    /// let b = TransitionBound { lower: None, upper: Some(15) };
-    /// let c = TransitionBound { lower: Some(10), upper: Some(std::u32::MAX) };
-    ///
-    /// assert!(a.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
-    /// assert!(b.shifted_by(5) == TransitionBound { lower: Some(5), upper: Some(20) });
-    /// assert!(c.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
-    /// ```
-    pub fn shifted_by(&self, amount: u32) -> Self {
-        let (lower, upper) = self.as_explicit();
-        TransitionBound {
-            // If overflow, panic.
-            lower: Some(lower + amount),
+    // /// Returns a copy of self but shifted by amount.
+    // ///
+    // /// ```
+    // /// use rust_efsm::TransitionBound;
+    // ///
+    // /// let a = TransitionBound { lower: Some(10), upper: None };
+    // /// let b = TransitionBound { lower: None, upper: Some(15) };
+    // /// let c = TransitionBound { lower: Some(10), upper: Some(std::u32::MAX) };
+    // ///
+    // /// assert!(a.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
+    // /// assert!(b.shifted_by(5) == TransitionBound { lower: Some(5), upper: Some(20) });
+    // /// assert!(c.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
+    // /// ```
+    // pub fn shifted_by(&self, amount: u32) -> Self {
+    //     let (lower, upper) = self.as_explicit();
+    //     TransitionBound {
+    //         // If overflow, panic.
+    //         lower: Some(lower + amount),
 
-            // If overflow, checked_add will return None.
-            // Since None indicates no upper bound, going above u32 MAX should result in None.
-            upper: upper.checked_add(amount),
-        }
-    }
+    //         // If overflow, checked_add will return None.
+    //         // Since None indicates no upper bound, going above u32 MAX should result in None.
+    //         upper: upper.checked_add(amount),
+    //     }
+    // }
 
     /// Returns inclusive intersection if it exists.
     /// Otherwise, returns None.
@@ -164,15 +167,14 @@ impl TransitionBound<u32> {
 }
 
 #[derive(Debug)]
-struct Location<D> {
-    // TODO: Right now state=location and location=state, we need to swap them.
-    state: String,
+struct State<D> {
+    location: String,
     data: D,
 }
 
-impl<D> From<Location<D>> for (String, D) {
-    fn from(loc: Location<D>) -> (String, D) {
-        (loc.state, loc.data)
+impl<D> From<State<D>> for (String, D) {
+    fn from(state: State<D>) -> (String, D) {
+        (state.location, state.data)
     }
 }
 
@@ -183,60 +185,65 @@ impl<D> From<Location<D>> for (String, D) {
 ///
 /// * [MachineBuilder]
 pub struct Machine<D, I, U> {
-    // Represents the directed graph of states and transitions.
-    states: HashMap<String, Vec<Transition<D, I, U>>>,
+    // Represents the directed graph of locations and transitions.
+    locations: HashMap<String, Vec<Transition<D, I, U>>>,
 
-    // Represents accepting states.
+    // Represents accepting locations.
     accepting: HashSet<String>,
 }
 
 impl<D: Clone + Debug, I: Debug, U: Update<D = D, I = I>> Machine<D, I, U> {
-    fn new(states: HashMap<String, Vec<Transition<D, I, U>>>, accepting: HashSet<String>) -> Self {
-        Machine { states, accepting }
+    fn new(
+        locations: HashMap<String, Vec<Transition<D, I, U>>>,
+        accepting: HashSet<String>,
+    ) -> Self {
+        Machine {
+            locations,
+            accepting,
+        }
     }
 
     pub fn get_accepting(&self) -> HashSet<String> {
         self.accepting.clone()
     }
 
-    pub fn get_transitions(&self, s: &str) -> Option<&Vec<Transition<D, I, U>>> {
-        self.states.get(s)
+    pub fn get_transitions(&self, location: &str) -> Option<&Vec<Transition<D, I, U>>> {
+        self.locations.get(location)
     }
 
-    /// Checks if the input sequence `is` belongs to the language defined by this machine.
-    pub fn exec(&self, s_init: &str, d_init: D, is: Vec<I>) -> bool {
+    /// Checks if the input sequence `input` belongs to the language defined by this machine.
+    pub fn exec(&self, location: &str, data: D, input: Vec<I>) -> bool {
         info!("executing input sequence");
 
-        let mut locations = vec![Location {
-            state: s_init.into(),
-            data: d_init,
+        let mut states = vec![State {
+            location: location.into(),
+            data,
         }];
 
-        for i in is {
+        for i in input {
             info!("received input {:?}", i);
-            info!("from locations {:?}", locations);
+            info!("in states {:?}", states);
 
-            locations = self.transition(&i, locations);
+            states = self.transition(&i, states);
 
-            info!("to locations {:?}", locations);
+            info!("transitioned to states {:?}", states);
         }
 
-        info!("reached end of input");
-        locations
+        states
             .iter()
-            .map(|loc| self.accepting.contains(&loc.state))
+            .map(|state| self.accepting.contains(&state.location))
             .fold(false, |acc, accept| acc || accept)
     }
 
-    fn transition(&self, i: &I, locations: Vec<Location<D>>) -> Vec<Location<D>> {
-        let mut next_locs: Vec<Location<D>> = Vec::new();
-        for (state, data) in locations.into_iter().map(|loc| loc.into()) {
-            if let Some(transitions) = self.states.get(&state) {
+    fn transition(&self, i: &I, states: Vec<State<D>>) -> Vec<State<D>> {
+        let mut next_states: Vec<State<D>> = Vec::new();
+        for (location, data) in states.into_iter().map(|state| state.into()) {
+            if let Some(transitions) = self.locations.get(&location) {
                 for transition in transitions {
                     if (transition.enable)(&data, &i) {
                         let data = transition.update.update(data.clone(), i);
-                        next_locs.push(Location {
-                            state: transition.s_out.clone(),
+                        next_states.push(State {
+                            location: transition.to_location.clone(),
                             data,
                         });
                     }
@@ -244,13 +251,148 @@ impl<D: Clone + Debug, I: Debug, U: Update<D = D, I = I>> Machine<D, I, U> {
             }
         }
 
-        next_locs
+        next_states
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct StateInterval<D>
+where
+    D: Eq + Hash,
+{
+    pub location: String,
+    pub interval: TransitionBound<D>,
+}
+
+pub struct PathNode<'a, D>
+where
+    D: Eq + Hash,
+{
+    state_interval: StateInterval<D>,
+    prev: Option<&'a PathNode<'a, D>>,
+    next: Vec<PathNode<'a, D>>,
+}
+
+impl<D> PathNode<'_, D>
+where
+    D: Eq + Hash,
+{
+    pub fn path_to(&self) -> Vec<&PathNode<D>> {
+        let mut path: Vec<&PathNode<D>> = vec![];
+        let mut curr: &PathNode<D> = self;
+        loop {
+            path.push(curr);
+
+            if let Some(prev) = curr.prev {
+                curr = prev;
+                continue;
+            }
+
+            break;
+        }
+
+        path
+    }
+}
+
+#[derive(Debug)]
+pub enum MachineError {
+    Undecidable,
+}
+
+impl<D, I, U> Machine<D, I, U> {
+    pub fn complement(&self) -> Result<Machine<D, I, U>, MachineError> {
+        Err(MachineError::Undecidable)
+    }
+}
+
+impl<D, I, U> Machine<D, I, U>
+where
+    D: Eq + Hash + Clone + Ord + Copy + Bounded,
+    U: Update<D = D>,
+{
+    pub fn find_sink_state_intervals_from(
+        &self,
+        start: StateInterval<D>,
+    ) -> Result<HashSet<StateInterval<D>>, MachineError> {
+        // Prerequisites
+        // All transitions must be bounded.
+
+        // A path is a vector of state intervals.
+        // A path is completed when it reaches an accepting state.
+        // A path is completed when it reaches a previously validated state interval.
+        // All state intervals in a completed path are not sink state intervals.
+
+        let mut safe: HashSet<StateInterval<D>> = HashSet::new();
+        let mut path_root = PathNode {
+            state_interval: start,
+            prev: None,
+            next: Vec::new(),
+        };
+
+        // Depth first search for accepting paths.
+        let mut nodes_to_visit: Vec<&PathNode<D>> = vec![&path_root];
+        loop {
+            // Check if current node is accepting
+            // Check if current node is in safe.
+            // If either of these, then add the full path to safe.
+            // We do not care if the intervals we push to safe are unique because the hash set will
+            // handle that.
+
+            if let Some(node) = nodes_to_visit.pop() {
+                info!("visit node");
+                if self.accepting.contains(&node.state_interval.location)
+                    || safe.contains(&node.state_interval)
+                {
+                    // Add path to safe.
+                    // Traverse up the parents to get the path.
+                    for parent in node.path_to() {
+                        safe.insert(parent.state_interval.clone());
+                    }
+                }
+
+                // Iterate over transitions out of current node.
+                if let Some(transitions) = self.locations.get(&node.state_interval.location) {
+                    for trans in transitions {
+                        // Compute intersection of the current state interval with the transition bounds.
+                        // If the resulting state interval is invalid, then continue.
+                        // This result indicates that this transition is not enabled from this state interval.
+
+                        if let Some(mut interval) =
+                            node.state_interval.interval.clone().intersect(&trans.bound)
+                        {
+                            // Apply the update function to the state interval.
+                            // The resulting state interval represents a new node in the path.
+
+                            let location = trans.to_location.clone();
+                            interval = trans.update.update_interval(interval);
+                            let mut state_interval = StateInterval { location, interval };
+
+                            // Add the node to the path by marking the child of curr_node.
+
+                            let index = node.next.len();
+                            node.next.push(PathNode {
+                                state_interval,
+                                prev: None,
+                                next: Vec::new(),
+                            });
+
+                            nodes_to_visit.push(&node.next[index]);
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(safe)
     }
 }
 
 /// Helps with specifying [Machines](Machine).
 pub struct MachineBuilder<D, I, U> {
-    states: HashMap<String, Vec<Transition<D, I, U>>>,
+    locations: HashMap<String, Vec<Transition<D, I, U>>>,
     accepting: HashSet<String>,
 }
 
@@ -258,31 +400,38 @@ impl<D: Default + Clone + Debug, I: Debug, U: Update<D = D, I = I>> MachineBuild
     /// Create a new machine builder.
     pub fn new() -> Self {
         MachineBuilder {
-            states: HashMap::new(),
+            locations: HashMap::new(),
             accepting: HashSet::new(),
         }
     }
 
-    /// Add a transition from state `s_in`.
-    pub fn with_transition(mut self, s_in: &str, t: Transition<D, I, U>) -> Self {
+    /// Add a transition from state `from_location`.
+    pub fn with_transition(mut self, from_location: &str, transition: Transition<D, I, U>) -> Self {
         info!(
-            "add transition from state '{}' to state '{}'",
-            s_in, t.s_out
+            "add transition {} to {}",
+            from_location, transition.to_location
         );
-        self.states.entry(s_in.into()).or_insert(Vec::new()).push(t);
+        self.locations
+            .entry(from_location.into())
+            .or_insert(Vec::new())
+            .push(transition);
         self
     }
 
     /// Mark state `s` as accepting.
-    pub fn with_accepting(mut self, s: &str) -> Self {
-        self.accepting.insert(s.into());
+    pub fn with_accepting(mut self, location: &str) -> Self {
+        info!("mark location {} as accepting", location);
+        self.accepting.insert(location.into());
         self
     }
 
     /// Create and return a new machine from the current specification.
     pub fn build(self) -> Machine<D, I, U> {
-        info!("build machine with {} states", self.states.keys().len());
-        Machine::new(self.states, self.accepting)
+        info!(
+            "build machine with {} locations",
+            self.locations.keys().len()
+        );
+        Machine::new(self.locations, self.accepting)
     }
 }
 
