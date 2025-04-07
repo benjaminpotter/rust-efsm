@@ -1,3 +1,4 @@
+use rust_efsm::gviz::GvGraph;
 use rust_efsm::mon::Monitor;
 use rust_efsm::{Machine, MachineBuilder, StateInterval, Transition, TransitionBound, Update};
 use std::collections::HashSet;
@@ -127,4 +128,7 @@ fn main() {
         location: "s0".into(),
         interval: TransitionBound::unbounded(),
     }));
+
+    let gv: GvGraph = machine.into();
+    std::fs::write::<_, String>("machine.gv", gv.into()).unwrap();
 }

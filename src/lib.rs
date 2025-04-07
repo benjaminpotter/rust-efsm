@@ -264,31 +264,34 @@ where
     pub interval: TransitionBound<D>,
 }
 
-pub struct PathNode<'a, D>
+#[derive(Debug)]
+pub struct PathNode<D>
 where
     D: Eq + Hash,
 {
+    idx: usize,
+    parent: Option<usize>,
+    children: Vec<usize>,
     state_interval: StateInterval<D>,
-    prev: Option<&'a PathNode<'a, D>>,
-    next: Vec<PathNode<'a, D>>,
 }
 
-impl<D> PathNode<'_, D>
+impl<D> PathNode<D>
 where
     D: Eq + Hash,
 {
-    pub fn path_to(&self) -> Vec<&PathNode<D>> {
-        let mut path: Vec<&PathNode<D>> = vec![];
-        let mut curr: &PathNode<D> = self;
+    pub fn path_to(&self, table: &[PathNode<D>]) -> Vec<usize> {
+        let mut path: Vec<usize> = vec![];
+        let mut next = self.idx;
+
         loop {
-            path.push(curr);
+            let node = &table[next];
+            path.push(next);
 
-            if let Some(prev) = curr.prev {
-                curr = prev;
-                continue;
+            if let Some(parent) = node.parent {
+                next = parent;
+            } else {
+                break;
             }
-
-            break;
         }
 
         path
@@ -308,7 +311,7 @@ impl<D, I, U> Machine<D, I, U> {
 
 impl<D, I, U> Machine<D, I, U>
 where
-    D: Eq + Hash + Clone + Ord + Copy + Bounded,
+    D: Eq + Hash + Clone + Ord + Copy + Bounded + Debug,
     U: Update<D = D>,
 {
     pub fn find_sink_state_intervals_from(
@@ -324,40 +327,57 @@ where
         // All state intervals in a completed path are not sink state intervals.
 
         let mut safe: HashSet<StateInterval<D>> = HashSet::new();
+
+        let mut nodes: Vec<PathNode<D>> = Vec::new();
+
         let mut path_root = PathNode {
             state_interval: start,
-            prev: None,
-            next: Vec::new(),
+            idx: nodes.len(),
+            parent: None,
+            children: Vec::new(),
         };
 
+        nodes.push(path_root);
+
         // Depth first search for accepting paths.
-        let mut nodes_to_visit: Vec<&PathNode<D>> = vec![&path_root];
-        loop {
+        let mut nodes_to_visit: Vec<usize> = vec![0];
+
+        const MAX_NODES: usize = 10;
+        while nodes.len() <= MAX_NODES {
             // Check if current node is accepting
             // Check if current node is in safe.
             // If either of these, then add the full path to safe.
             // We do not care if the intervals we push to safe are unique because the hash set will
             // handle that.
 
-            if let Some(node) = nodes_to_visit.pop() {
-                info!("visit node");
-                if self.accepting.contains(&node.state_interval.location)
-                    || safe.contains(&node.state_interval)
+            if let Some(idx) = nodes_to_visit.pop() {
+                info!("visit node {idx}");
+
+                if self.accepting.contains(&nodes[idx].state_interval.location)
+                    || safe.contains(&nodes[idx].state_interval)
                 {
                     // Add path to safe.
                     // Traverse up the parents to get the path.
-                    for parent in node.path_to() {
+
+                    let node = &nodes[idx];
+                    info!("{:?} is safe", node);
+
+                    for parent_idx in node.path_to(&nodes[..]) {
+                        let parent = &nodes[parent_idx];
                         safe.insert(parent.state_interval.clone());
                     }
                 }
 
                 // Iterate over transitions out of current node.
-                if let Some(transitions) = self.locations.get(&node.state_interval.location) {
+                if let Some(transitions) = self.locations.get(&nodes[idx].state_interval.location) {
+                    info!("exploring transitions");
                     for trans in transitions {
                         // Compute intersection of the current state interval with the transition bounds.
                         // If the resulting state interval is invalid, then continue.
                         // This result indicates that this transition is not enabled from this state interval.
 
+                        let child_idx = nodes.len();
+                        let mut node = &mut nodes[idx];
                         if let Some(mut interval) =
                             node.state_interval.interval.clone().intersect(&trans.bound)
                         {
@@ -368,16 +388,24 @@ where
                             interval = trans.update.update_interval(interval);
                             let mut state_interval = StateInterval { location, interval };
 
+                            info!("state interval {:?}", state_interval);
+
                             // Add the node to the path by marking the child of curr_node.
 
-                            let index = node.next.len();
-                            node.next.push(PathNode {
-                                state_interval,
-                                prev: None,
-                                next: Vec::new(),
-                            });
+                            let parent = idx;
+                            let idx = child_idx;
 
-                            nodes_to_visit.push(&node.next[index]);
+                            let path_node = PathNode {
+                                state_interval,
+                                idx,
+                                parent: Some(parent),
+                                children: Vec::new(),
+                            };
+
+                            info!("adding node to search queue");
+                            node.children.push(idx);
+                            nodes_to_visit.push(idx);
+                            nodes.push(path_node);
                         }
                     }
                 }
