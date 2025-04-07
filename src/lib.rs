@@ -15,6 +15,7 @@ pub mod mon;
 use num::Bounded;
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::fmt::Debug;
 use std::hash::Hash;
 use tracing::info;
@@ -77,9 +78,19 @@ impl<D> TransitionBound<D> {
     }
 }
 
+impl<D> fmt::Display for TransitionBound<D>
+where
+    D: fmt::Display + Bounded + Copy,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (lower, upper) = self.as_explicit();
+        write!(f, "[{}, {}]", lower, upper)
+    }
+}
+
 impl<D> TransitionBound<D>
 where
-    D: PartialOrd + Ord + Bounded + Copy,
+    D: Bounded + Copy,
 {
     // Replaces None with an explict value.
     // This value depends on which generic type we are implementing.
@@ -100,7 +111,10 @@ where
 
     // Replaces absolute bounds with None.
     // Inverse operation of as_explicit.
-    fn from_explicit(bound: (D, D)) -> Self {
+    fn from_explicit(bound: (D, D)) -> Self
+    where
+        D: Eq,
+    {
         let lower = Some(bound.0)
             // Set lower to None if it's equal to zero.
             .filter(|b| !(*b == D::min_value()));
@@ -111,7 +125,12 @@ where
 
         TransitionBound { lower, upper }
     }
+}
 
+impl<D> TransitionBound<D>
+where
+    D: Ord + Copy + Bounded,
+{
     // /// Returns a copy of self but shifted by amount.
     // ///
     // /// ```

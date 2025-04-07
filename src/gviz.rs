@@ -1,4 +1,6 @@
 use crate::Machine;
+use num::Bounded;
+use std::fmt;
 
 pub struct GvGraph {
     nodes: Vec<GvNode>,
@@ -55,7 +57,10 @@ impl From<GvGraph> for String {
     }
 }
 
-impl<D, I, U> From<Machine<D, I, U>> for GvGraph {
+impl<D, I, U> From<Machine<D, I, U>> for GvGraph
+where
+    D: fmt::Display + Bounded + Copy,
+{
     fn from(machine: Machine<D, I, U>) -> Self {
         let mut gv = GvGraph::new();
 
@@ -76,7 +81,7 @@ impl<D, I, U> From<Machine<D, I, U>> for GvGraph {
             // Each transition gets a GvEdge.
             for t in transitions {
                 gv.edges.push(GvEdge {
-                    label: String::new(),
+                    label: format!("{}", t.bound),
 
                     // TODO: We can avoid clone by referencing the machine's original copy.
                     // TODO: This requires that the machine outlives the graph.
