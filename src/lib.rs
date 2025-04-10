@@ -12,12 +12,14 @@
 pub mod gviz;
 pub mod mon;
 
-use num::Bounded;
+use num::{Bounded, CheckedAdd};
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::marker::PhantomData;
+use std::ops::Add;
 use tracing::info;
 
 type Enable<D, I> = fn(&D, &I) -> bool;
@@ -38,6 +40,33 @@ pub trait Update {
     // updates or using generics but only get one update struct.
     fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
     fn update_interval(&self, interval: TransitionBound<Self::D>) -> TransitionBound<Self::D>;
+}
+
+pub struct AddUpdate<D, I>
+where
+    D: Add,
+{
+    amount: D,
+    phantom: PhantomData<I>,
+}
+
+impl<D, I> Update for AddUpdate<D, I>
+where
+    D: Add<Output = D> + Bounded + Copy + CheckedAdd,
+{
+    type D = D;
+    type I = I;
+
+    fn update(&self, data: D, input: &I) -> D {
+        data + self.amount
+    }
+    fn update_interval(&self, interval: TransitionBound<D>) -> TransitionBound<D> {
+        let (lower, upper) = interval.as_explicit();
+        TransitionBound {
+            lower: Some(lower + self.amount),
+            upper: upper.checked_add(&self.amount),
+        }
+    }
 }
 
 /// Describes a single transition relation.
@@ -333,6 +362,14 @@ where
     D: Eq + Hash + Clone + Ord + Copy + Bounded + Debug,
     U: Update<D = D>,
 {
+    /// Find all StateIntervals that may lead to acceptance.
+    ///
+    /// ```
+    /// use rust_efsm::{Machine, MachineBuilder, AddUpdate, Transition, TransitionBound, Update};
+    /// let machine = MachineBuilder::<u8, u8, AddUpdate<u8, u8>>::new().build();
+    ///
+    ///
+    /// ```
     pub fn find_sink_state_intervals_from(
         &self,
         start: StateInterval<D>,
@@ -489,13 +526,13 @@ mod tests {
     #[test]
     fn transition_bound_as_explicit() {
         let a = TransitionBound {
-            lower: Some(10),
+            lower: Some(10_u32),
             upper: None,
         };
 
         let b = TransitionBound {
             lower: None,
-            upper: Some(15),
+            upper: Some(15_u32),
         };
 
         assert!(a.as_explicit() == (10, std::u32::MAX));
@@ -510,7 +547,7 @@ mod tests {
         assert!(
             TransitionBound::from_explicit(a)
                 == TransitionBound {
-                    lower: Some(10),
+                    lower: Some(10_u32),
                     upper: None,
                 }
         );
@@ -519,7 +556,7 @@ mod tests {
             TransitionBound::from_explicit(b)
                 == TransitionBound {
                     lower: None,
-                    upper: Some(15),
+                    upper: Some(15_u32),
                 }
         );
     }

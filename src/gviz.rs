@@ -60,6 +60,7 @@ impl From<GvGraph> for String {
 impl<D, I, U> From<Machine<D, I, U>> for GvGraph
 where
     D: fmt::Display + Bounded + Copy,
+    U: fmt::Display,
 {
     fn from(machine: Machine<D, I, U>) -> Self {
         let mut gv = GvGraph::new();
@@ -81,7 +82,7 @@ where
             // Each transition gets a GvEdge.
             for t in transitions {
                 gv.edges.push(GvEdge {
-                    label: format!("{}", t.bound),
+                    label: format!("{}<br/>{}", t.update, t.bound),
 
                     // TODO: We can avoid clone by referencing the machine's original copy.
                     // TODO: This requires that the machine outlives the graph.

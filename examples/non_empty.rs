@@ -2,12 +2,19 @@ use rust_efsm::gviz::GvGraph;
 use rust_efsm::mon::Monitor;
 use rust_efsm::{Machine, MachineBuilder, StateInterval, Transition, TransitionBound, Update};
 use std::collections::HashSet;
+use std::fmt;
 use std::u32;
 use tracing::info;
 
 #[derive(Default)]
 struct AddUpdate {
     amount: u32,
+}
+
+impl fmt::Display for AddUpdate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "d += {}", self.amount)
+    }
 }
 
 impl Update for AddUpdate {
