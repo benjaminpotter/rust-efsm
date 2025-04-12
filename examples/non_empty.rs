@@ -1,12 +1,11 @@
 use rust_efsm::gviz::GvGraph;
 use rust_efsm::mon::Monitor;
-use rust_efsm::{Machine, MachineBuilder, StateInterval, Transition, TransitionBound, Update};
-use std::collections::HashSet;
+use rust_efsm::{MachineBuilder, Transition, TransitionBound, Update};
 use std::fmt;
 use std::u32;
 use tracing::info;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct AddUpdate {
     amount: u32,
 }
@@ -47,15 +46,26 @@ fn main() {
     // Define a machine following the specification from the first example in the assignment.
     // Machine operates on a u32 register with u8 (ASCII) input.
     let machine = MachineBuilder::<u32, u8, AddUpdate>::new()
-        // Define a transition from s0 to s1,
-        // where input is a 'c',
-        // there are no bounds on the transition,
-        // and the transition will increment the u32 register.
+        .with_transition(
+            "s0",
+            Transition {
+                to_location: "s0".into(),
+                enable: |_, letter| *letter != b'b',
+                update: 0.into(),
+                bound: TransitionBound {
+                    lower: None,
+                    upper: Some(10),
+                },
+
+                // Notice the omission of certain members which get the default.
+                ..Default::default()
+            },
+        )
         .with_transition(
             "s0",
             Transition {
                 to_location: "s1".into(),
-                enable: |_, letter| *letter == b'c',
+                enable: |_, letter| *letter == b'b',
 
                 // Because the From<u32> trait is implemented for AddUpdate, the compiler will know
                 // that a 1 here actually means AddUpdate { amount: 1 }.
@@ -64,18 +74,11 @@ fn main() {
                 // Here we explicitly set the bounds, which is not required due to ..Default::default pattern below.
                 // Since many transitions may not have bounds, we consider this the default.
                 // If a member is not explicitly set in the constructor, ..Default::default will fill it with the default value.
-                bound: TransitionBound::unbounded(),
+                bound: TransitionBound {
+                    lower: None,
+                    upper: Some(3),
+                },
 
-                ..Default::default()
-            },
-        )
-        .with_transition(
-            "s0",
-            Transition {
-                to_location: "s0".into(),
-                enable: |_, letter| *letter == b'b',
-
-                // Notice the omission of certain members which get the default.
                 ..Default::default()
             },
         )
@@ -85,56 +88,60 @@ fn main() {
             "s1",
             Transition {
                 to_location: "s1".into(),
-                enable: |_, letter| *letter == b'a',
-                update: 4.into(),
-
-                // All bounds are inclusive.
-                //
-                // Justification:
-                // Any bound over u32 defined with strict operators can also be defined using inclusive operators.
-                //
-                // What does None imply?
-                // A lower bound of None is equivalent to 0 <= r1.
-                // Conversely, an upper bound of None is equivalent to r1 <= u32::MAX.
+                enable: |_, letter| *letter == b'b',
+                update: 1.into(),
+                ..Default::default()
+            },
+        )
+        .with_transition(
+            "s1",
+            Transition {
+                to_location: "s3".into(),
+                enable: |_, letter| *letter != b'b',
+                update: 0.into(),
                 bound: TransitionBound {
                     lower: None,
-                    upper: Some(7),
+                    upper: Some(3),
                 },
-                ..Default::default()
-            },
-        )
-        .with_transition(
-            "s1",
-            Transition {
-                to_location: "s0".into(),
-                enable: |_, letter| *letter == b'd',
-
-                // Notice that the bound is converted to a strict representation.
-                // We express r1 >= 8 as r1 > 7.
-                bound: TransitionBound {
-                    lower: Some(8),
-                    upper: None,
-                },
-                ..Default::default()
-            },
-        )
-        .with_transition(
-            "s1",
-            Transition {
-                to_location: "s1".into(),
-                enable: |_, letter| *letter == b't',
                 ..Default::default()
             },
         )
         .with_accepting("s1")
         .build();
 
-    // let monitor = Monitor::from_machine(machine).unwrap();
+    let machine = (move || {
+        let copy = machine.clone();
+        if let Ok(mut monitor) = Monitor::new("s0", 0, machine) {
+            info!("start monitoring");
+            for input in vec![b'b', b'b', b'b'] {
+                match monitor.next(&input) {
+                    Ok(verdict) => info!("input: {}, verdict: {:?}", input as char, verdict),
+                    Err(e) => info!("error: {:?}", e),
+                }
+            }
+        } else {
+            info!("invalid monitor");
+        }
 
-    dbg!(machine.find_sink_state_intervals_from(StateInterval {
-        location: "s0".into(),
-        interval: TransitionBound::unbounded(),
-    }));
+        copy
+    })();
+
+    let machine = (move || {
+        let copy = machine.clone();
+        if let Ok(mut monitor) = Monitor::new("s0", 0, machine) {
+            info!("start monitoring");
+            for input in vec![b'b', b'a', b'a'] {
+                match monitor.next(&input) {
+                    Ok(verdict) => info!("input: {}, verdict: {:?}", input as char, verdict),
+                    Err(e) => info!("error: {:?}", e),
+                }
+            }
+        } else {
+            info!("invalid monitor");
+        }
+
+        copy
+    })();
 
     let gv: GvGraph = machine.into();
     std::fs::write::<_, String>("machine.gv", gv.into()).unwrap();
