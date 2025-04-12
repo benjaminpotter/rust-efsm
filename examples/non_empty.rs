@@ -1,6 +1,7 @@
+use rust_efsm::bound::TransitionBound;
 use rust_efsm::gviz::GvGraph;
-use rust_efsm::mon::Monitor;
-use rust_efsm::{MachineBuilder, Transition, TransitionBound, Update};
+use rust_efsm::machine::{MachineBuilder, Transition, Update};
+use rust_efsm::monitor::Monitor;
 use std::fmt;
 use std::u32;
 use tracing::info;

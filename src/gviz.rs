@@ -1,4 +1,4 @@
-use crate::Machine;
+use crate::machine::Machine;
 use num::Bounded;
 use std::fmt;
 
@@ -65,10 +65,9 @@ where
     fn from(machine: Machine<D, I, U>) -> Self {
         let mut gv = GvGraph::new();
 
-        // FIXME: Avoid using Machine's private API.
-        for (location, transitions) in &machine.locations {
+        for (location, transitions) in machine.get_locations() {
             // Double line for accepting states.
-            let peripheries = match machine.accepting.contains(location) {
+            let peripheries = match machine.get_accepting().contains(location) {
                 true => 2,
                 false => 1,
             };

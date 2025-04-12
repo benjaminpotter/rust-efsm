@@ -1,4 +1,5 @@
-use crate::{Machine, State, TransitionBound, Update};
+use crate::bound::TransitionBound;
+use crate::machine::{Machine, State, Update};
 use num::Bounded;
 use std::collections::HashMap;
 use std::fmt;
@@ -97,16 +98,16 @@ where
 
         // If there is more than one next state, return an error.
         if next.len() == 1 {
-            let next = next.pop().expect("the length was just checked");
+            let (location, data) = next.pop().expect("the length was just checked").into();
 
             // If the next state is in the sink state list, then check the non_empty interval.
-            if let Some(bound) = self.non_empty_states.get(&self.state.location) {
+            if let Some(bound) = self.non_empty_states.get(&location) {
                 // If the next state is in the interval, we are still inconclusive.
-                if bound.contains(&self.state.data) {
+                if bound.contains(&data) {
                     // This is because a verdict can only be returned when the next state cannot reach an
                     // accepting condition.
 
-                    self.state = next;
+                    self.state = (location, data).into();
                     return Ok(false);
                 }
             }
