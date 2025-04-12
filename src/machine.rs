@@ -7,104 +7,6 @@ use std::hash::Hash;
 use std::ops::Add;
 use tracing::{debug, info};
 
-type Enable<D, I> = fn(&D, &I) -> bool;
-
-/// Creates a D based on information from an existing D and a new I.
-/// It can also use an immutable reference to self.
-///
-/// It is similar to Enable, because it is called during a transition.
-/// However, the Update function may store read-only state.
-pub trait Update {
-    type D;
-
-    // NOTE: ATM, there is only one implementation of update function used for every transition.
-    // NOTE: The user can store data in the update state, so they can just switch on some enum.
-    // NOTE: I don't know if this is really desirable yet?
-    // NOTE: I think the trade off is between suffering dynamic disbatch to enable different
-    // updates or using generics but only get one update struct.
-    fn update<I>(&self, data: Self::D, input: &I) -> Self::D;
-    fn update_interval(&self, interval: Bound<Self::D>) -> Bound<Self::D>;
-}
-
-#[derive(Clone)]
-pub struct AddUpdate<D>
-where
-    D: Add,
-{
-    pub amount: D,
-}
-
-impl<D> Update for AddUpdate<D>
-where
-    D: Add<Output = D> + Bounded + Copy + CheckedAdd,
-{
-    type D = D;
-
-    fn update<I>(&self, data: D, _input: &I) -> D {
-        data + self.amount
-    }
-    fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
-        let (lower, upper) = interval.as_explicit();
-        Bound {
-            lower: Some(lower + self.amount),
-            upper: upper.checked_add(&self.amount),
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct IdentityUpdate<D>(D);
-
-impl<D> Update for IdentityUpdate<D> {
-    type D = D;
-    fn update<I>(&self, data: Self::D, _: &I) -> Self::D {
-        data
-    }
-
-    fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
-        interval
-    }
-}
-
-/// Describes a single transition relation.
-#[derive(Clone)]
-pub struct Transition<D, I, U> {
-    pub to_location: String,
-    pub enable: Enable<D, I>,
-    pub bound: Bound<D>,
-    pub update: U,
-}
-
-impl<D, I, U: Default> Default for Transition<D, I, U> {
-    fn default() -> Self {
-        Transition {
-            to_location: "default".into(),
-            enable: |_, _| true,
-            bound: Bound::unbounded(),
-            update: Default::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct State<D> {
-    pub location: String,
-    pub data: D,
-}
-
-impl<D> From<State<D>> for (String, D) {
-    fn from(state: State<D>) -> (String, D) {
-        (state.location, state.data)
-    }
-}
-
-impl<D> From<(String, D)> for State<D> {
-    fn from(tuple: (String, D)) -> State<D> {
-        let (location, data) = tuple;
-        State { location, data }
-    }
-}
-
 /// Describes an EFSM.
 /// In most cases, use the [builder](MachineBuilder) to specify a machine.
 ///
@@ -118,37 +20,6 @@ pub struct Machine<D, I, U> {
 
     // Represents accepting locations.
     accepting: HashSet<String>,
-}
-
-impl<D, I, U> Machine<D, I, U>
-where
-    D: Clone + Debug,
-    I: Debug,
-    U: Update<D = D>,
-{
-    /// Checks if the input sequence `input` belongs to the language defined by this machine.
-    pub fn exec(&self, location: &str, data: D, input: Vec<I>) -> bool {
-        info!("executing input sequence");
-
-        let mut states = vec![State {
-            location: location.into(),
-            data,
-        }];
-
-        for i in input {
-            info!("received input {:?}", i);
-            info!("in states {:?}", states);
-
-            states = self.transition(&i, states);
-
-            info!("transitioned to states {:?}", states);
-        }
-
-        states
-            .iter()
-            .map(|state| self.accepting.contains(&state.location))
-            .fold(false, |acc, accept| acc || accept)
-    }
 }
 
 impl<D, I, U> Machine<D, I, U> {
@@ -173,19 +44,22 @@ impl<D, I, U> Machine<D, I, U> {
     pub fn get_transitions_from(&self, location: &str) -> Option<&Vec<Transition<D, I, U>>> {
         self.locations.get(location)
     }
-}
 
-impl<D, I, U> Machine<D, I, U>
-where
-    D: Clone,
-    U: Update<D = D>,
-{
-    pub fn transition(&self, i: &I, states: Vec<State<D>>) -> Vec<State<D>> {
+    pub fn transition(&self, i: &I, states: Vec<State<D>>) -> Vec<State<D>>
+    where
+        D: Clone,
+        U: Update<D = D>,
+    {
         let mut next_states: Vec<State<D>> = Vec::new();
+
+        // Iterate over the current states.
         for (location, data) in states.into_iter().map(|state| state.into()) {
+            // Get the list of transitions out of this location.
             if let Some(transitions) = self.locations.get(&location) {
                 for transition in transitions {
+                    // Check if the transition is enabled.
                     if (transition.enable)(&data, &i) {
+                        // Take the transition, which means we apply the update function.
                         let data = transition.update.update(data.clone(), i);
                         next_states.push(State {
                             location: transition.to_location.clone(),
@@ -198,86 +72,36 @@ where
 
         next_states
     }
-}
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct StateInterval<D>
-where
-    D: Eq + Hash,
-{
-    pub location: String,
-    pub interval: Bound<D>,
-}
+    /// Checks if the input sequence `input` belongs to the language defined by this machine.
+    pub fn exec(&self, location: &str, data: D, input: Vec<I>) -> bool
+    where
+        D: Clone + Debug,
+        I: Debug,
+        U: Update<D = D>,
+    {
+        info!("executing input sequence");
 
-impl<D> fmt::Display for StateInterval<D>
-where
-    D: fmt::Display + Eq + Hash + Bounded + Copy,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.location, self.interval)
-    }
-}
+        let mut states = vec![State {
+            location: location.into(),
+            data,
+        }];
 
-#[derive(Debug)]
-pub struct PathNode<D>
-where
-    D: Eq + Hash,
-{
-    idx: usize,
-    parent: Option<(usize, Bound<D>)>,
-    location: String,
-    interval: Bound<D>,
-}
+        for i in input {
+            info!("received input {:?}", i);
+            info!("in states {:?}", states);
 
-impl<D> PathNode<D>
-where
-    D: Eq + Hash + Clone,
-{
-    pub fn path_to(&self, table: &[PathNode<D>]) -> impl Iterator<Item = usize> {
-        let mut path: Vec<usize> = vec![];
-        let mut next = self.idx;
+            states = self.transition(&i, states);
 
-        loop {
-            let node = &table[next];
-            path.push(next);
-
-            if let Some((parent_idx, _)) = node.parent {
-                next = parent_idx;
-            } else {
-                break;
-            }
+            info!("transitioned to states {:?}", states);
         }
 
-        path.reverse();
-        path.into_iter()
+        states
+            .iter()
+            .map(|state| self.accepting.contains(&state.location))
+            .fold(false, |acc, accept| acc || accept)
     }
-}
 
-impl<D> fmt::Display for PathNode<D>
-where
-    D: Eq + Hash + fmt::Display + Copy + Bounded,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(loc: {}, interval: {})", self.location, self.interval)
-    }
-}
-
-#[derive(Debug)]
-pub enum MachineError {
-    Undecidable,
-    FindNonEmptyFailed,
-}
-
-impl fmt::Display for MachineError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MachineError::Undecidable => write!(f, "{:?}", self),
-            MachineError::FindNonEmptyFailed => write!(f, "{:?}", self),
-        }
-    }
-}
-
-impl<D, I, U> Machine<D, I, U> {
     pub fn complement(mut self) -> Result<Machine<D, I, U>, MachineError> {
         // Preconditions:
         // (1) Machine is deterministic.
@@ -295,13 +119,7 @@ impl<D, I, U> Machine<D, I, U> {
         self.accepting = rejecting;
         Ok(self)
     }
-}
 
-impl<D, I, U> Machine<D, I, U>
-where
-    D: Eq + Hash + Clone + Ord + Copy + Bounded + Debug + fmt::Display,
-    U: Update<D = D>,
-{
     /// Find all StateIntervals that lead to acceptance.
     ///
     /// ```
@@ -311,10 +129,11 @@ where
     ///
     ///
     /// ```
-    pub fn find_non_empty(
-        &self,
-        location: &str,
-    ) -> Result<HashMap<String, Bound<D>>, MachineError> {
+    pub fn find_non_empty(&self, location: &str) -> Result<HashMap<String, Bound<D>>, MachineError>
+    where
+        D: Eq + Hash + Clone + Ord + Copy + Bounded + Debug + fmt::Display,
+        U: Update<D = D>,
+    {
         // Prerequisites
         // Deterministic?
         // FIXME: Cycles can cause unbounded execution... I think?
@@ -426,6 +245,181 @@ where
         }
 
         Ok(safe)
+    }
+}
+
+/// Describes a single transition relation.
+#[derive(Clone)]
+pub struct Transition<D, I, U> {
+    pub to_location: String,
+    pub enable: Enable<D, I>,
+    pub bound: Bound<D>,
+    pub update: U,
+}
+
+impl<D, I, U: Default> Default for Transition<D, I, U> {
+    fn default() -> Self {
+        Transition {
+            to_location: "default".into(),
+            enable: |_, _| true,
+            bound: Bound::unbounded(),
+            update: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct State<D> {
+    pub location: String,
+    pub data: D,
+}
+
+impl<D> From<State<D>> for (String, D) {
+    fn from(state: State<D>) -> (String, D) {
+        (state.location, state.data)
+    }
+}
+
+impl<D> From<(String, D)> for State<D> {
+    fn from(tuple: (String, D)) -> State<D> {
+        let (location, data) = tuple;
+        State { location, data }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct StateInterval<D>
+where
+    D: Eq + Hash,
+{
+    pub location: String,
+    pub interval: Bound<D>,
+}
+
+impl<D> fmt::Display for StateInterval<D>
+where
+    D: fmt::Display + Eq + Hash + Bounded + Copy,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.location, self.interval)
+    }
+}
+
+type Enable<D, I> = fn(&D, &I) -> bool;
+
+/// Creates a D based on information from an existing D and a new I.
+/// It can also use an immutable reference to self.
+///
+/// It is similar to Enable, because it is called during a transition.
+/// However, the Update function may store read-only state.
+pub trait Update {
+    type D;
+
+    // NOTE: ATM, there is only one implementation of update function used for every transition.
+    // NOTE: The user can store data in the update state, so they can just switch on some enum.
+    // NOTE: I don't know if this is really desirable yet?
+    // NOTE: I think the trade off is between suffering dynamic disbatch to enable different
+    // updates or using generics but only get one update struct.
+    fn update<I>(&self, data: Self::D, input: &I) -> Self::D;
+    fn update_interval(&self, interval: Bound<Self::D>) -> Bound<Self::D>;
+}
+
+#[derive(Clone)]
+pub struct AddUpdate<D>
+where
+    D: Add,
+{
+    pub amount: D,
+}
+
+impl<D> Update for AddUpdate<D>
+where
+    D: Add<Output = D> + Bounded + Copy + CheckedAdd,
+{
+    type D = D;
+
+    fn update<I>(&self, data: D, _input: &I) -> D {
+        data + self.amount
+    }
+    fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
+        let (lower, upper) = interval.as_explicit();
+        Bound {
+            lower: Some(lower + self.amount),
+            upper: upper.checked_add(&self.amount),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct IdentityUpdate<D>(D);
+
+impl<D> Update for IdentityUpdate<D> {
+    type D = D;
+    fn update<I>(&self, data: Self::D, _: &I) -> Self::D {
+        data
+    }
+
+    fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
+        interval
+    }
+}
+
+#[derive(Debug)]
+pub struct PathNode<D>
+where
+    D: Eq + Hash,
+{
+    idx: usize,
+    parent: Option<(usize, Bound<D>)>,
+    location: String,
+    interval: Bound<D>,
+}
+
+impl<D> PathNode<D>
+where
+    D: Eq + Hash + Clone,
+{
+    pub fn path_to(&self, table: &[PathNode<D>]) -> impl Iterator<Item = usize> {
+        let mut path: Vec<usize> = vec![];
+        let mut next = self.idx;
+
+        loop {
+            let node = &table[next];
+            path.push(next);
+
+            if let Some((parent_idx, _)) = node.parent {
+                next = parent_idx;
+            } else {
+                break;
+            }
+        }
+
+        path.reverse();
+        path.into_iter()
+    }
+}
+
+impl<D> fmt::Display for PathNode<D>
+where
+    D: Eq + Hash + fmt::Display + Copy + Bounded,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(loc: {}, interval: {})", self.location, self.interval)
+    }
+}
+
+#[derive(Debug)]
+pub enum MachineError {
+    Undecidable,
+    FindNonEmptyFailed,
+}
+
+impl fmt::Display for MachineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MachineError::Undecidable => write!(f, "{:?}", self),
+            MachineError::FindNonEmptyFailed => write!(f, "{:?}", self),
+        }
     }
 }
 

@@ -9,16 +9,22 @@
 //!
 //! \[1\] Cheng, K.-T. & Krishnakumar, A. Automatic Functional Test Generation Using The Extended Finite State Machine Model.
 
+#[warn(missing_docs)]
 pub mod bound;
+
+#[warn(missing_docs)]
 pub mod gviz;
+
+#[warn(missing_docs)]
 pub mod machine;
+
+#[warn(missing_docs)]
 pub mod monitor;
 
 #[cfg(test)]
 mod tests {
     use crate::machine::{IdentityUpdate, Machine, MachineBuilder, Transition};
     use crate::monitor::Monitor;
-    use std::fmt;
 
     #[test]
     fn monitor_not() {
