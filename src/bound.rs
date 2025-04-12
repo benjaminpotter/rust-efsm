@@ -6,25 +6,25 @@ use std::hash::Hash;
 
 /// Inclusive bound over type D.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct TransitionBound<D> {
+pub struct Bound<D> {
     // TODO: This really needs to be an enum...
     pub lower: Option<D>,
     pub upper: Option<D>,
 }
 
-impl<D> TransitionBound<D> {
+impl<D> Bound<D> {
     pub fn unbounded() -> Self {
         // A bound of None indicates there is no bound.
         // This is useful when implementations do not care about bounding D.
         // If we force D to implement Ord, then this might change.
-        TransitionBound {
+        Bound {
             lower: None,
             upper: None,
         }
     }
 }
 
-impl<D> fmt::Display for TransitionBound<D>
+impl<D> fmt::Display for Bound<D>
 where
     D: fmt::Display + Bounded + Copy,
 {
@@ -34,7 +34,7 @@ where
     }
 }
 
-impl<D> TransitionBound<D>
+impl<D> Bound<D>
 where
     D: Bounded + Copy,
 {
@@ -69,30 +69,30 @@ where
             // Set upper to None if it's equal to u32 MAX.
             .filter(|b| !(*b == D::max_value()));
 
-        TransitionBound { lower, upper }
+        Bound { lower, upper }
     }
 }
 
-impl<D> TransitionBound<D>
+impl<D> Bound<D>
 where
     D: Ord + Copy + Bounded,
 {
     // /// Returns a copy of self but shifted by amount.
     // ///
     // /// ```
-    // /// use rust_efsm::TransitionBound;
+    // /// use rust_efsm::Bound;
     // ///
-    // /// let a = TransitionBound { lower: Some(10), upper: None };
-    // /// let b = TransitionBound { lower: None, upper: Some(15) };
-    // /// let c = TransitionBound { lower: Some(10), upper: Some(std::u32::MAX) };
+    // /// let a = Bound { lower: Some(10), upper: None };
+    // /// let b = Bound { lower: None, upper: Some(15) };
+    // /// let c = Bound { lower: Some(10), upper: Some(std::u32::MAX) };
     // ///
-    // /// assert!(a.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
-    // /// assert!(b.shifted_by(5) == TransitionBound { lower: Some(5), upper: Some(20) });
-    // /// assert!(c.shifted_by(5) == TransitionBound { lower: Some(15), upper: None });
+    // /// assert!(a.shifted_by(5) == Bound { lower: Some(15), upper: None });
+    // /// assert!(b.shifted_by(5) == Bound { lower: Some(5), upper: Some(20) });
+    // /// assert!(c.shifted_by(5) == Bound { lower: Some(15), upper: None });
     // /// ```
     // pub fn shifted_by(&self, amount: u32) -> Self {
     //     let (lower, upper) = self.as_explicit();
-    //     TransitionBound {
+    //     Bound {
     //         // If overflow, panic.
     //         lower: Some(lower + amount),
 
@@ -106,15 +106,15 @@ where
     /// Otherwise, returns None.
     ///
     /// ```
-    /// use rust_efsm::bound::TransitionBound;
+    /// use rust_efsm::bound::Bound;
     ///
-    /// let a = TransitionBound { lower: Some(10), upper: None };
-    /// let b = TransitionBound { lower: None, upper: Some(15) };
-    /// let c = TransitionBound { lower: None, upper: None };
+    /// let a = Bound { lower: Some(10), upper: None };
+    /// let b = Bound { lower: None, upper: Some(15) };
+    /// let c = Bound { lower: None, upper: None };
     ///
-    /// assert!(a.intersect(&b) == Some(TransitionBound { lower: Some(10), upper: Some(15) }));
-    /// assert!(a.intersect(&c) == Some(TransitionBound { lower: Some(10), upper: None }));
-    /// assert!(b.intersect(&c) == Some(TransitionBound { lower: None, upper: Some(15) }));
+    /// assert!(a.intersect(&b) == Some(Bound { lower: Some(10), upper: Some(15) }));
+    /// assert!(a.intersect(&c) == Some(Bound { lower: Some(10), upper: None }));
+    /// assert!(b.intersect(&c) == Some(Bound { lower: None, upper: Some(15) }));
     /// ```
     pub fn intersect(&self, other: &Self) -> Option<Self> {
         let (s_lower, s_upper) = self.as_explicit();
@@ -123,14 +123,14 @@ where
         if s_lower > o_upper || s_upper < o_lower {
             None
         } else {
-            Some(TransitionBound::from_explicit((
+            Some(Bound::from_explicit((
                 max(s_lower, o_lower),
                 min(s_upper, o_upper),
             )))
         }
     }
 
-    pub fn union_with(&mut self, rhs: &TransitionBound<D>) {
+    pub fn union_with(&mut self, rhs: &Bound<D>) {
         // TODO: disjoint parts???
 
         let (l_lower, l_upper) = self.as_explicit();
@@ -139,7 +139,7 @@ where
         // if l_lower > r_upper || l_upper < r_lower {
         //     None
         // } else {
-        //     Some(TransitionBound::from_explicit((
+        //     Some(Bound::from_explicit((
         //         min(l_lower, r_lower),
         //         max(l_upper, r_upper),
         //     )))
@@ -154,7 +154,7 @@ where
         *data >= lower && *data <= upper
     }
 
-    pub fn contains_interval(&self, rhs: &TransitionBound<D>) -> bool {
+    pub fn contains_interval(&self, rhs: &Bound<D>) -> bool {
         let (ll, lu) = self.as_explicit();
         let (rl, ru) = rhs.as_explicit();
         ll <= rl && lu >= ru
@@ -166,13 +166,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transition_bound_as_explicit() {
-        let a = TransitionBound {
+    fn bound_as_explicit() {
+        let a = Bound {
             lower: Some(10_u32),
             upper: None,
         };
 
-        let b = TransitionBound {
+        let b = Bound {
             lower: None,
             upper: Some(15_u32),
         };
@@ -182,21 +182,21 @@ mod tests {
     }
 
     #[test]
-    fn transition_bound_from_explicit() {
+    fn bound_from_explicit() {
         let a = (10, std::u32::MAX);
         let b = (0, 15);
 
         assert!(
-            TransitionBound::from_explicit(a)
-                == TransitionBound {
+            Bound::from_explicit(a)
+                == Bound {
                     lower: Some(10_u32),
                     upper: None,
                 }
         );
 
         assert!(
-            TransitionBound::from_explicit(b)
-                == TransitionBound {
+            Bound::from_explicit(b)
+                == Bound {
                     lower: None,
                     upper: Some(15_u32),
                 }

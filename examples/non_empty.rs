@@ -1,4 +1,4 @@
-use rust_efsm::bound::TransitionBound;
+use rust_efsm::bound::Bound;
 use rust_efsm::gviz::GvGraph;
 use rust_efsm::machine::{MachineBuilder, Transition, Update};
 use rust_efsm::monitor::Monitor;
@@ -25,9 +25,9 @@ impl Update for AddUpdate {
         data + self.amount
     }
 
-    fn update_interval(&self, interval: TransitionBound<Self::D>) -> TransitionBound<Self::D> {
+    fn update_interval(&self, interval: Bound<Self::D>) -> Bound<Self::D> {
         let (lower, upper) = interval.as_explicit();
-        TransitionBound {
+        Bound {
             lower: Some(lower + self.amount),
             upper: upper.checked_add(self.amount),
         }
@@ -53,7 +53,7 @@ fn main() {
                 to_location: "s0".into(),
                 enable: |_, letter| *letter != b'b',
                 update: 0.into(),
-                bound: TransitionBound {
+                bound: Bound {
                     lower: None,
                     upper: Some(10),
                 },
@@ -75,7 +75,7 @@ fn main() {
                 // Here we explicitly set the bounds, which is not required due to ..Default::default pattern below.
                 // Since many transitions may not have bounds, we consider this the default.
                 // If a member is not explicitly set in the constructor, ..Default::default will fill it with the default value.
-                bound: TransitionBound {
+                bound: Bound {
                     lower: None,
                     upper: Some(3),
                 },
@@ -100,7 +100,7 @@ fn main() {
                 to_location: "s3".into(),
                 enable: |_, letter| *letter != b'b',
                 update: 0.into(),
-                bound: TransitionBound {
+                bound: Bound {
                     lower: None,
                     upper: Some(3),
                 },

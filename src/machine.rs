@@ -1,4 +1,4 @@
-use crate::bound::TransitionBound;
+use crate::bound::Bound;
 use num::{Bounded, CheckedAdd};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -25,7 +25,7 @@ pub trait Update {
     // NOTE: I think the trade off is between suffering dynamic disbatch to enable different
     // updates or using generics but only get one update struct.
     fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
-    fn update_interval(&self, interval: TransitionBound<Self::D>) -> TransitionBound<Self::D>;
+    fn update_interval(&self, interval: Bound<Self::D>) -> Bound<Self::D>;
 }
 
 #[derive(Clone)]
@@ -47,9 +47,9 @@ where
     fn update(&self, data: D, _input: &I) -> D {
         data + self.amount
     }
-    fn update_interval(&self, interval: TransitionBound<D>) -> TransitionBound<D> {
+    fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
         let (lower, upper) = interval.as_explicit();
-        TransitionBound {
+        Bound {
             lower: Some(lower + self.amount),
             upper: upper.checked_add(&self.amount),
         }
@@ -61,7 +61,7 @@ where
 pub struct Transition<D, I, U> {
     pub to_location: String,
     pub enable: Enable<D, I>,
-    pub bound: TransitionBound<D>,
+    pub bound: Bound<D>,
     pub update: U,
 }
 
@@ -70,7 +70,7 @@ impl<D, I, U: Default> Default for Transition<D, I, U> {
         Transition {
             to_location: "default".into(),
             enable: |_, _| true,
-            bound: TransitionBound::unbounded(),
+            bound: Bound::unbounded(),
             update: Default::default(),
         }
     }
@@ -196,7 +196,7 @@ where
     D: Eq + Hash,
 {
     pub location: String,
-    pub interval: TransitionBound<D>,
+    pub interval: Bound<D>,
 }
 
 impl<D> fmt::Display for StateInterval<D>
@@ -214,9 +214,9 @@ where
     D: Eq + Hash,
 {
     idx: usize,
-    parent: Option<(usize, TransitionBound<D>)>,
+    parent: Option<(usize, Bound<D>)>,
     location: String,
-    interval: TransitionBound<D>,
+    interval: Bound<D>,
 }
 
 impl<D> PathNode<D>
@@ -296,7 +296,7 @@ where
     ///
     /// ```
     /// use rust_efsm::machine::{Machine, MachineBuilder, AddUpdate, Transition, Update};
-    /// use rust_efsm::bound::TransitionBound;
+    /// use rust_efsm::bound::Bound;
     /// let machine = MachineBuilder::<u8, u8, AddUpdate<u8, u8>>::new().build();
     ///
     ///
@@ -304,7 +304,7 @@ where
     pub fn find_non_empty(
         &self,
         location: &str,
-    ) -> Result<HashMap<String, TransitionBound<D>>, MachineError> {
+    ) -> Result<HashMap<String, Bound<D>>, MachineError> {
         // Prerequisites
         // Deterministic?
         // FIXME: Cycles can cause unbounded execution... I think?
@@ -315,9 +315,9 @@ where
         // A path is completed when it reaches a previously validated state interval.
         // All state intervals in a completed path are not sink state intervals.
 
-        let mut safe: HashMap<String, TransitionBound<D>> = HashMap::new();
+        let mut safe: HashMap<String, Bound<D>> = HashMap::new();
         for location in &self.accepting {
-            safe.insert(location.clone(), TransitionBound::unbounded());
+            safe.insert(location.clone(), Bound::unbounded());
         }
 
         let mut nodes: Vec<PathNode<D>> = Vec::new();
@@ -326,7 +326,7 @@ where
         let path_root = PathNode {
             idx: nodes.len(),
             parent: None,
-            interval: TransitionBound::unbounded(),
+            interval: Bound::unbounded(),
             location,
         };
 

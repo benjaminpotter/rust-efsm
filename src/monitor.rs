@@ -1,4 +1,4 @@
-use crate::bound::TransitionBound;
+use crate::bound::Bound;
 use crate::machine::{Machine, State, Update};
 use num::Bounded;
 use std::collections::HashMap;
@@ -49,7 +49,7 @@ where
 struct PartialMonitor<D, I, U> {
     state: State<D>,
     machine: Machine<D, I, U>,
-    non_empty_states: HashMap<String, TransitionBound<D>>,
+    non_empty_states: HashMap<String, Bound<D>>,
 }
 
 impl<D, I, U> PartialMonitor<D, I, U>
