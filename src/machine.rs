@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::ops::Add;
 use tracing::{debug, info};
 
@@ -17,34 +16,31 @@ type Enable<D, I> = fn(&D, &I) -> bool;
 /// However, the Update function may store read-only state.
 pub trait Update {
     type D;
-    type I;
 
     // NOTE: ATM, there is only one implementation of update function used for every transition.
     // NOTE: The user can store data in the update state, so they can just switch on some enum.
     // NOTE: I don't know if this is really desirable yet?
     // NOTE: I think the trade off is between suffering dynamic disbatch to enable different
     // updates or using generics but only get one update struct.
-    fn update(&self, data: Self::D, input: &Self::I) -> Self::D;
+    fn update<I>(&self, data: Self::D, input: &I) -> Self::D;
     fn update_interval(&self, interval: Bound<Self::D>) -> Bound<Self::D>;
 }
 
 #[derive(Clone)]
-pub struct AddUpdate<D, I>
+pub struct AddUpdate<D>
 where
     D: Add,
 {
-    amount: D,
-    phantom: PhantomData<I>,
+    pub amount: D,
 }
 
-impl<D, I> Update for AddUpdate<D, I>
+impl<D> Update for AddUpdate<D>
 where
     D: Add<Output = D> + Bounded + Copy + CheckedAdd,
 {
     type D = D;
-    type I = I;
 
-    fn update(&self, data: D, _input: &I) -> D {
+    fn update<I>(&self, data: D, _input: &I) -> D {
         data + self.amount
     }
     fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
@@ -53,6 +49,20 @@ where
             lower: Some(lower + self.amount),
             upper: upper.checked_add(&self.amount),
         }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct IdentityUpdate<D>(D);
+
+impl<D> Update for IdentityUpdate<D> {
+    type D = D;
+    fn update<I>(&self, data: Self::D, _: &I) -> Self::D {
+        data
+    }
+
+    fn update_interval(&self, interval: Bound<D>) -> Bound<D> {
+        interval
     }
 }
 
@@ -114,7 +124,7 @@ impl<D, I, U> Machine<D, I, U>
 where
     D: Clone + Debug,
     I: Debug,
-    U: Update<D = D, I = I>,
+    U: Update<D = D>,
 {
     /// Checks if the input sequence `input` belongs to the language defined by this machine.
     pub fn exec(&self, location: &str, data: D, input: Vec<I>) -> bool {
@@ -168,7 +178,7 @@ impl<D, I, U> Machine<D, I, U> {
 impl<D, I, U> Machine<D, I, U>
 where
     D: Clone,
-    U: Update<D = D, I = I>,
+    U: Update<D = D>,
 {
     pub fn transition(&self, i: &I, states: Vec<State<D>>) -> Vec<State<D>> {
         let mut next_states: Vec<State<D>> = Vec::new();
@@ -297,7 +307,7 @@ where
     /// ```
     /// use rust_efsm::machine::{Machine, MachineBuilder, AddUpdate, Transition, Update};
     /// use rust_efsm::bound::Bound;
-    /// let machine = MachineBuilder::<u8, u8, AddUpdate<u8, u8>>::new().build();
+    /// let machine = MachineBuilder::<u8, u8, AddUpdate<u8>>::new().build();
     ///
     ///
     /// ```
@@ -370,7 +380,7 @@ where
                     {
                         debug!("    (loc:{}, cond: {})", location, safe_interval);
                         safe.entry(location.clone())
-                            .and_modify(|bound| bound.union_with(&safe_interval))
+                            .and_modify(|bound| bound.make_contain(&safe_interval))
                             .or_insert(safe_interval.clone());
                     }
 
@@ -429,7 +439,7 @@ impl<D, I, U> MachineBuilder<D, I, U>
 where
     D: Default + Clone + Debug,
     I: Debug,
-    U: Update<D = D, I = I>,
+    U: Update<D = D>,
 {
     /// Create a new machine builder.
     pub fn new() -> Self {

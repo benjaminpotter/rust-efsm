@@ -19,9 +19,8 @@ impl fmt::Display for AddUpdate {
 
 impl Update for AddUpdate {
     type D = u32;
-    type I = u8;
 
-    fn update(&self, data: Self::D, _input: &Self::I) -> Self::D {
+    fn update<I>(&self, data: Self::D, _input: &I) -> Self::D {
         data + self.amount
     }
 
@@ -41,11 +40,8 @@ impl From<u32> for AddUpdate {
 }
 
 fn main() {
-    // Prints INFO events to STDOUT.
     tracing_subscriber::fmt::init();
 
-    // Define a machine following the specification from the first example in the assignment.
-    // Machine operates on a u32 register with u8 (ASCII) input.
     let machine = MachineBuilder::<u32, u8, AddUpdate>::new()
         .with_transition(
             "s0",
@@ -58,7 +54,6 @@ fn main() {
                     upper: Some(10),
                 },
 
-                // Notice the omission of certain members which get the default.
                 ..Default::default()
             },
         )
@@ -67,24 +62,14 @@ fn main() {
             Transition {
                 to_location: "s1".into(),
                 enable: |_, letter| *letter == b'b',
-
-                // Because the From<u32> trait is implemented for AddUpdate, the compiler will know
-                // that a 1 here actually means AddUpdate { amount: 1 }.
                 update: 1.into(),
-
-                // Here we explicitly set the bounds, which is not required due to ..Default::default pattern below.
-                // Since many transitions may not have bounds, we consider this the default.
-                // If a member is not explicitly set in the constructor, ..Default::default will fill it with the default value.
                 bound: Bound {
                     lower: None,
                     upper: Some(3),
                 },
-
                 ..Default::default()
             },
         )
-        // Define a similar transition to before,
-        // this time an explicit bound is assigned.
         .with_transition(
             "s1",
             Transition {
@@ -114,27 +99,15 @@ fn main() {
         let copy = machine.clone();
         if let Ok(mut monitor) = Monitor::new("s0", 0, machine) {
             info!("start monitoring");
-            for input in vec![b'b', b'b', b'b'] {
-                match monitor.next(&input) {
-                    Ok(verdict) => info!("input: {}, verdict: {:?}", input as char, verdict),
-                    Err(e) => info!("error: {:?}", e),
-                }
-            }
-        } else {
-            info!("invalid monitor");
-        }
+            for input in vec![b'c', b'b', b'c'] {
+                if let Ok(verdict) = monitor.next(&input) {
+                    info!("input: {}, verdict: {:?}", input as char, verdict);
 
-        copy
-    })();
-
-    let machine = (move || {
-        let copy = machine.clone();
-        if let Ok(mut monitor) = Monitor::new("s0", 0, machine) {
-            info!("start monitoring");
-            for input in vec![b'b', b'a', b'a'] {
-                match monitor.next(&input) {
-                    Ok(verdict) => info!("input: {}, verdict: {:?}", input as char, verdict),
-                    Err(e) => info!("error: {:?}", e),
+                    if let Some(_) = verdict {
+                        break;
+                    }
+                } else {
+                    info!("error");
                 }
             }
         } else {
